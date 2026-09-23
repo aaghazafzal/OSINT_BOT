@@ -69,7 +69,15 @@ _prefix_index: dict = defaultdict(list)
 _index_built = False
 
 INDEX_CACHE_FILE = Path("/tmp/drive_index.json")
-MAX_WORKERS = 20  # Parallel API calls
+MAX_WORKERS = 5  # Safe thread count (google-api-python-client not fully thread-safe)
+
+def _make_service():
+    """Har thread ke liye alag Drive service banao (thread-safety ke liye)"""
+    creds_dict = json.loads(GDRIVE_CREDS)
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    )
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 def build_drive_index():
     global _prefix_index, _index_built
@@ -120,12 +128,14 @@ def build_drive_index():
         lock = threading.Lock()
 
         def process_chunk(chunk_id, chunk_num):
-            """Ek chunk ke saare prefix folders aur files fetch karo"""
+            """Ek chunk ke saare prefix folders aur files fetch karo (apna service)"""
             local_entries = defaultdict(list)
             try:
+                # ✅ Thread-safe: apna alag service banao
+                svc = _make_service()
                 page_token = None
                 while True:
-                    resp = service.files().list(
+                    resp = svc.files().list(
                         q=f"'{chunk_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
                         fields="nextPageToken, files(id, name)", pageSize=200, pageToken=page_token
                     ).execute()
@@ -134,9 +144,8 @@ def build_drive_index():
                                       for pf in resp.get("files", [])
                                       if pf["name"].startswith("prefix=")]
 
-                    # Har prefix folder ke parquet files ek batch me lo
                     for pf_id, prefix_val in prefix_folders:
-                        presp = service.files().list(
+                        presp = svc.files().list(
                             q=f"'{pf_id}' in parents and name contains '.parquet' and trashed=false",
                             fields="files(id)", pageSize=50
                         ).execute()
@@ -150,6 +159,7 @@ def build_drive_index():
                 log.warning(f"Chunk {chunk_num} error: {e}")
 
             return local_entries
+
 
         # 20 parallel workers se sabhi chunks ek sath process karo
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
