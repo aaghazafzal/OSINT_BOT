@@ -68,17 +68,35 @@ def get_drive_service():
 _prefix_index: dict = defaultdict(list)
 _index_built = False
 
+INDEX_CACHE_FILE = Path("/tmp/drive_index.json")
+MAX_WORKERS = 20  # Parallel API calls
+
 def build_drive_index():
     global _prefix_index, _index_built
+
+    # ✅ Cache check - agar pehle se bana hua hai toh load karo (instant!)
+    if INDEX_CACHE_FILE.exists():
+        try:
+            data = json.loads(INDEX_CACHE_FILE.read_text())
+            for k, v in data.items():
+                _prefix_index[k] = [tuple(x) for x in v]
+            _index_built = True
+            total = sum(len(v) for v in _prefix_index.values())
+            log.info(f"⚡ Index loaded from cache: {len(_prefix_index)} prefixes, {total} files")
+            return
+        except Exception as e:
+            log.warning(f"Cache load failed, rebuilding: {e}")
+
     service = get_drive_service()
     if not service:
         log.error("Drive unavailable, index not built")
         return
 
-    log.info("🔍 Building Drive index...")
+    log.info("🔍 Building Drive index (parallel)...")
     start = time.time()
+
     try:
-        # Get all chunk folders
+        # Step 1: Get all chunk folders
         chunk_folders = {}
         page_token = None
         while True:
@@ -94,34 +112,81 @@ def build_drive_index():
             page_token = resp.get("nextPageToken")
             if not page_token: break
 
-        log.info(f"Found {len(chunk_folders)} chunk folders")
+        log.info(f"Found {len(chunk_folders)} chunk folders. Building index in parallel...")
 
-        # Get prefix folders inside each chunk
-        for chunk_id, chunk_num in chunk_folders.items():
-            page_token = None
-            while True:
-                resp = service.files().list(
-                    q=f"'{chunk_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-                    fields="nextPageToken, files(id, name)", pageSize=200, pageToken=page_token
-                ).execute()
-                for pf in resp.get("files", []):
-                    if pf["name"].startswith("prefix="):
-                        prefix_val = pf["name"].split("=")[1]
-                        # Get parquet files in this prefix folder
+        # Step 2: Get prefix folders for ALL chunks in parallel
+        import concurrent.futures
+        temp_index = defaultdict(list)
+        lock = threading.Lock()
+
+        def process_chunk(chunk_id, chunk_num):
+            """Ek chunk ke saare prefix folders aur files fetch karo"""
+            local_entries = defaultdict(list)
+            try:
+                page_token = None
+                while True:
+                    resp = service.files().list(
+                        q=f"'{chunk_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                        fields="nextPageToken, files(id, name)", pageSize=200, pageToken=page_token
+                    ).execute()
+
+                    prefix_folders = [(pf["id"], pf["name"].split("=")[1])
+                                      for pf in resp.get("files", [])
+                                      if pf["name"].startswith("prefix=")]
+
+                    # Har prefix folder ke parquet files ek batch me lo
+                    for pf_id, prefix_val in prefix_folders:
                         presp = service.files().list(
-                            q=f"'{pf['id']}' in parents and name contains '.parquet' and trashed=false",
+                            q=f"'{pf_id}' in parents and name contains '.parquet' and trashed=false",
                             fields="files(id)", pageSize=50
                         ).execute()
                         for pf2 in presp.get("files", []):
-                            _prefix_index[prefix_val].append((chunk_num, pf2["id"]))
-                page_token = resp.get("nextPageToken")
-                if not page_token: break
+                            local_entries[prefix_val].append((chunk_num, pf2["id"]))
+
+                    page_token = resp.get("nextPageToken")
+                    if not page_token: break
+
+            except Exception as e:
+                log.warning(f"Chunk {chunk_num} error: {e}")
+
+            return local_entries
+
+        # 20 parallel workers se sabhi chunks ek sath process karo
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {
+                executor.submit(process_chunk, cid, cnum): cnum
+                for cid, cnum in chunk_folders.items()
+            }
+            completed = 0
+            for future in concurrent.futures.as_completed(futures):
+                chunk_result = future.result()
+                with lock:
+                    for prefix, entries in chunk_result.items():
+                        temp_index[prefix].extend(entries)
+                completed += 1
+                if completed % 10 == 0:
+                    log.info(f"Progress: {completed}/{len(chunk_folders)} chunks indexed")
+
+        # Step 3: Index update karo
+        with lock:
+            for k, v in temp_index.items():
+                _prefix_index[k] = v
 
         _index_built = True
+        elapsed = time.time() - start
         total = sum(len(v) for v in _prefix_index.values())
-        log.info(f"✅ Index ready: {len(_prefix_index)} prefixes, {total} files ({time.time()-start:.1f}s)")
+        log.info(f"✅ Index built: {len(_prefix_index)} prefixes, {total} files ({elapsed:.1f}s)")
+
+        # Step 4: Cache save karo (next restart me instant load hoga!)
+        try:
+            INDEX_CACHE_FILE.write_text(json.dumps(dict(_prefix_index)))
+            log.info(f"💾 Index cached to {INDEX_CACHE_FILE}")
+        except Exception as e:
+            log.warning(f"Cache save failed: {e}")
+
     except Exception as e:
         log.error(f"❌ Index build failed: {e}")
+
 
 # ============================================================
 # ⬇️ DOWNLOADER
