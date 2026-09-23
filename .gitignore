@@ -1,0 +1,22 @@
+# Credentials - KABHI COMMIT MAT KARNA!
+credentials.json
+*.json
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temp files
+/tmp/
+*.tmp

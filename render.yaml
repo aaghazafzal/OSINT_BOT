@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: osint-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 main:flask_app
+    plan: free
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: DRIVE_FOLDER_ID
+        sync: false
+      - key: GDRIVE_CREDENTIALS
+        sync: false
