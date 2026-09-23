@@ -352,19 +352,35 @@ def health():
     return {"status": "ok", "index_built": _index_built, "prefixes": len(_prefix_index)}, 200
 
 def run_bot():
-    """Bot polling - background thread me chalta hai"""
+    """Bot polling - background thread me chalta hai (no signal handlers)"""
     log.info("🤖 Starting bot polling...")
+
+    async def _run():
+        app = Application.builder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("stats", cmd_stats))
+        app.add_handler(CommandHandler("clearcache", cmd_clearcache))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+
+        await app.initialize()
+        await app.start()
+        # run_polling() ki jagah direct updater use karo (signal handlers nahi lagate)
+        await app.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=["message"]
+        )
+        log.info("✅ Bot polling started successfully!")
+        # Forever run karo
+        while True:
+            await asyncio.sleep(60)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_run())
+    except Exception as e:
+        log.error(f"❌ Bot crashed: {e}")
 
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("stats", cmd_stats))
-    app.add_handler(CommandHandler("clearcache", cmd_clearcache))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
-
-    log.info("✅ Bot handlers registered, polling started!")
-    app.run_polling(drop_pending_updates=True, allowed_updates=["message"])
 
 def startup():
     """Gunicorn import hone par automatically chalta hai"""
