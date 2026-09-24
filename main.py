@@ -199,10 +199,11 @@ def build_drive_index():
 
 
 # ============================================================
-# ⬇️ DOWNLOADER
+# ⬇️ DOWNLOADER - Parallel + Pre-Warm
 # ============================================================
 _dl_locks = {}
 _dl_lock_master = threading.Lock()
+import concurrent.futures as _cf
 
 def get_dl_lock(prefix):
     with _dl_lock_master:
@@ -210,8 +211,27 @@ def get_dl_lock(prefix):
             _dl_locks[prefix] = threading.Lock()
         return _dl_locks[prefix]
 
+def _download_one(args):
+    """Single file download - apna alag service use karta hai (thread-safe)"""
+    file_id, local_path = args
+    try:
+        svc = _make_service()
+        req = svc.files().get_media(fileId=file_id)
+        buf = io.BytesIO()
+        dl = MediaIoBaseDownload(buf, req, chunksize=16 * 1024 * 1024)  # 16MB chunks
+        done = False
+        while not done:
+            _, done = dl.next_chunk()
+        local_path.write_bytes(buf.getvalue())
+        return True
+    except Exception as e:
+        log.warning(f"Download failed {file_id}: {e}")
+        return False
+
 def get_prefix_files_sync(prefix: str) -> list:
     cache_path = CACHE_DIR / f"p_{prefix}"
+
+    # Cache hit - already downloaded
     if cache_path.exists():
         files = list(cache_path.glob("*.parquet"))
         if files:
@@ -224,28 +244,51 @@ def get_prefix_files_sync(prefix: str) -> list:
             if files: return files
 
         cache_path.mkdir(parents=True, exist_ok=True)
-        service = get_drive_service()
-        if not service: return []
-
         entries = _prefix_index.get(prefix, [])
         if not entries: return []
 
-        log.info(f"⬇️ Downloading {len(entries)} files for prefix={prefix}")
-        downloaded = []
-        for idx, (chunk_num, file_id) in enumerate(entries):
-            local_path = cache_path / f"c{chunk_num}_{idx}.parquet"
-            try:
-                req = service.files().get_media(fileId=file_id)
-                buf = io.BytesIO()
-                dl = MediaIoBaseDownload(buf, req, chunksize=8*1024*1024)
-                done = False
-                while not done: _, done = dl.next_chunk()
-                local_path.write_bytes(buf.getvalue())
-                downloaded.append(local_path)
-            except Exception as e:
-                log.warning(f"Download failed {file_id}: {e}")
-        log.info(f"✅ {len(downloaded)} files downloaded for prefix={prefix}")
+        log.info(f"⬇️ Parallel downloading {len(entries)} files for prefix={prefix}")
+        start = time.time()
+
+        # Prepare tasks list
+        tasks = [
+            (file_id, cache_path / f"c{chunk_num}_{idx}.parquet")
+            for idx, (chunk_num, file_id) in enumerate(entries)
+        ]
+
+        # ⚡ 10 parallel threads se ek sath download karo
+        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
+            list(ex.map(_download_one, tasks))
+
+        downloaded = list(cache_path.glob("*.parquet"))
+        log.info(f"✅ prefix={prefix}: {len(downloaded)} files in {time.time()-start:.1f}s")
         return downloaded
+
+def prewarm_prefixes():
+    """Index ready hone ke baad background me sabhi prefixes download karo"""
+    # Wait for index to be ready
+    while not _index_built:
+        time.sleep(5)
+
+    log.info("🔥 Pre-warming prefix cache in background...")
+    # Sabse zyada files wale prefixes pehle download karo
+    sorted_prefixes = sorted(
+        _prefix_index.keys(),
+        key=lambda p: len(_prefix_index[p]),
+        reverse=True
+    )
+
+    done = 0
+    for prefix in sorted_prefixes:
+        cache_path = CACHE_DIR / f"p_{prefix}"
+        if not cache_path.exists() or not list(cache_path.glob("*.parquet")):
+            get_prefix_files_sync(prefix)
+        done += 1
+        if done % 50 == 0:
+            log.info(f"🔥 Pre-warm progress: {done}/{len(sorted_prefixes)} prefixes cached")
+
+    log.info(f"🔥 Pre-warm complete! All {done} prefixes cached.")
+
 
 # ============================================================
 # 🔢 NUMBER NORMALIZER
@@ -516,7 +559,9 @@ def startup():
     threading.Thread(target=build_drive_index, daemon=True, name="DriveIndex").start()
     threading.Thread(target=run_bot, daemon=True, name="TelegramBot").start()
     threading.Thread(target=self_ping_loop, daemon=True, name="SelfPing").start()
+    threading.Thread(target=prewarm_prefixes, daemon=True, name="PreWarm").start()
     log.info("✅ All background threads started!")
+
 
 # Gunicorn jab bhi main.py import kare, startup chalega
 startup()
