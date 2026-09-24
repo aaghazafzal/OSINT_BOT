@@ -31,6 +31,9 @@ BOT_TOKEN        = os.environ.get("BOT_TOKEN", "")
 ADMIN_IDS        = list(map(int, filter(None, os.environ.get("ADMIN_IDS", "0").split(","))))
 DRIVE_FOLDER_ID  = os.environ.get("DRIVE_FOLDER_ID", "")   # Merged_Prefix_DB folder ID
 GDRIVE_CREDS     = os.environ.get("GDRIVE_CREDENTIALS", "")
+MINI_APP_URL     = os.environ.get("MINI_APP_URL", "")      # Set when mini app is ready
+
+SEARCH_STICKER   = "CAACAgIAAxkBAAER8OxqtUbJd5JUeIcWIz3w6VOxZSD2BwAC4xAAAqch4EmHTbt5tPu_Xz0E"
 
 MAX_REQ_PER_MIN  = 10
 CACHE_DIR        = Path("/tmp/prefix_cache")
@@ -39,6 +42,82 @@ INDEX_CACHE_FILE = Path("/tmp/drive_index.json")
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 log = logging.getLogger(__name__)
+
+# ============================================================
+# 📡 RAW BOT API — Colored Buttons (Bot API 9.4+ style param)
+# ============================================================
+import requests as _req
+
+def _raw_send(chat_id, text, keyboard: list, parse_mode="Markdown", reply_to=None):
+    """Send message with colored buttons via raw Bot API"""
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": parse_mode,
+        "reply_markup": {"inline_keyboard": keyboard},
+    }
+    if reply_to:
+        payload["reply_to_message_id"] = reply_to
+    try:
+        r = _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                      json=payload, timeout=15)
+        data = r.json()
+        return data.get("result", {}).get("message_id")
+    except Exception as e:
+        log.warning(f"raw_send error: {e}")
+        return None
+
+def _raw_edit(chat_id, msg_id, text, keyboard: list, parse_mode="Markdown"):
+    payload = {
+        "chat_id": chat_id,
+        "message_id": msg_id,
+        "text": text,
+        "parse_mode": parse_mode,
+        "reply_markup": {"inline_keyboard": keyboard},
+    }
+    try:
+        _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+                  json=payload, timeout=15)
+    except Exception as e:
+        log.warning(f"raw_edit error: {e}")
+
+def _raw_delete(chat_id, msg_id):
+    try:
+        _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                  json={"chat_id": chat_id, "message_id": msg_id}, timeout=10)
+    except Exception as e:
+        log.warning(f"raw_delete error: {e}")
+
+def _build_result_kb(found=True):
+    """Colored keyboard - green for found, red for not found"""
+    row1 = [
+        {"text": "🔍 Search Another Number", "switch_inline_query_current_chat": ""},
+        {
+            "text": "✅ Match Found!" if found else "❌ No Record",
+            "callback_data": "cb_noop",
+            "style": "bg_success" if found else "bg_danger",
+        }
+    ]
+    keyboard = [row1]
+    if MINI_APP_URL:
+        keyboard.append([{
+            "text": "🎮 Play Mini Game",
+            "web_app": {"url": MINI_APP_URL}
+        }])
+    else:
+        keyboard.append([{
+            "text": "📊 Database Status",
+            "callback_data": "cb_status",
+            "style": "bg_primary",
+        }])
+    return keyboard
+
+def _build_searching_kb():
+    """Keyboard shown while searching"""
+    if MINI_APP_URL:
+        return [[{"text": "🎮 Play While Searching...", "web_app": {"url": MINI_APP_URL}}]]
+    return [[{"text": "⏳ Searching...", "callback_data": "cb_noop", "style": "bg_primary"}]]
+
 
 # ============================================================
 # 🔑 GOOGLE DRIVE
@@ -443,8 +522,9 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    text = update.message.text.strip()
+    uid     = update.effective_user.id
+    chat_id = update.effective_chat.id
+    text    = update.message.text.strip()
 
     limited, wait = is_limited(uid)
     if limited:
@@ -457,9 +537,9 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not mobile:
         if update.message.chat.type == "private":
             await update.message.reply_text(
-                "⚠️ *Invalid format!*\n\n"
+                "⚠️ *Invalid Number Format!*\n\n"
                 "Please send a valid Indian mobile number:\n"
-                "`9876543210` | `+919876543210`",
+                "`9876543210`\n`+919876543210`\n`919876543210`",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("ℹ️ Help", callback_data="cb_help")
@@ -470,7 +550,8 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _index_built:
         await update.message.reply_text(
             "🔴 *Database is loading...*\n\n"
-            "Please wait a moment and try again.",
+            "Please wait a moment and try again.\n"
+            "_Usually ready within 1-2 minutes after restart._",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🔄 Check Status", callback_data="cb_status")
@@ -478,48 +559,75 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    status_msg = await update.message.reply_text(
-        f"🔍 *Searching* `{mobile}`*...*", parse_mode=ParseMode.MARKDOWN)
+    # ── Step 1: Send sticker (plays while searching) ──
+    sticker_msg = await update.message.reply_sticker(SEARCH_STICKER)
 
+    # ── Step 2: Send engaging search message with mini app button ──
+    search_text = (
+        f"🔍 *Searching Database...*\n\n"
+        f"📱 *Number:* `{mobile}`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚡ Scanning *230GB+* telecom records\n"
+        "🛰 Querying across *87 data chunks*\n"
+        "🔐 Secure encrypted lookup in progress\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "_🕐 New numbers take 5-30s to fetch._\n"
+        "_Previously searched numbers are instant!_"
+    )
+    search_msg_id = _raw_send(
+        chat_id, search_text,
+        _build_searching_kb(),
+        reply_to=update.message.message_id
+    )
+
+    # ── Step 3: Run search in background ──
     loop = asyncio.get_event_loop()
     results, elapsed = await loop.run_in_executor(None, search_mobile, mobile)
 
+    # ── Step 4: Delete sticker ──
+    await sticker_msg.delete()
+
+    # ── Step 5: Show result with colored buttons ──
     if not results:
-        await status_msg.edit_text(
+        not_found = (
             f"❌ *No Records Found*\n\n"
-            f"📱 `{mobile}` is not in our database.\n"
-            f"_Search completed in {elapsed:.2f}s_",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=not_found_kb()
+            f"📱 `{mobile}` is not in our database.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏱ Completed in `{elapsed:.2f}s`\n"
+            "Try a different number or check the format."
         )
+        if search_msg_id:
+            _raw_edit(chat_id, search_msg_id, not_found, _build_result_kb(found=False))
+        else:
+            await update.message.reply_text(not_found, parse_mode=ParseMode.MARKDOWN)
         return
 
-    total = len(results)
+    total  = len(results)
     header = (
-        f"✅ *{total} Record{'s' if total > 1 else ''} Found!*  "
+        f"✅ *{total} Record{'s' if total > 1 else ''} Found!*\n"
         f"⚡ `{elapsed:.2f}s`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
     )
-    # Last record gets the keyboard, first records don't
+    first_text = header + fmt_row(results[0], 1, total)
+
     if total == 1:
-        await status_msg.edit_text(
-            header + fmt_row(results[0], 1, total),
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=result_kb()
-        )
+        if search_msg_id:
+            _raw_edit(chat_id, search_msg_id, first_text, _build_result_kb(found=True))
+        else:
+            await update.message.reply_text(first_text, parse_mode=ParseMode.MARKDOWN)
     else:
-        await status_msg.edit_text(
-            header + fmt_row(results[0], 1, total),
-            parse_mode=ParseMode.MARKDOWN
-        )
+        if search_msg_id:
+            _raw_edit(chat_id, search_msg_id, first_text, [])
+        else:
+            await update.message.reply_text(first_text, parse_mode=ParseMode.MARKDOWN)
         for i, row in enumerate(results[1:], 2):
-            is_last = (i == total)
-            await update.message.reply_text(
-                "━━━━━━━━━━━━━━━━━━━━━\n" + fmt_row(row, i, total),
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=result_kb() if is_last else None
-            )
+            row_text = "━━━━━━━━━━━━━━━━━━━━━\n" + fmt_row(row, i, total)
+            if i == total:
+                _raw_send(chat_id, row_text, _build_result_kb(found=True))
+            else:
+                await update.message.reply_text(row_text, parse_mode=ParseMode.MARKDOWN)
             await asyncio.sleep(0.3)
+
 
 
 # ============================================================
