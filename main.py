@@ -199,7 +199,7 @@ def build_drive_index():
 
 
 # ============================================================
-# ⬇️ DOWNLOADER - Parallel + Pre-Warm
+# ⬇️ DOWNLOADER - Disk Streaming (Memory Safe)
 # ============================================================
 _dl_locks = {}
 _dl_lock_master = threading.Lock()
@@ -212,26 +212,28 @@ def get_dl_lock(prefix):
         return _dl_locks[prefix]
 
 def _download_one(args):
-    """Single file download - apna alag service use karta hai (thread-safe)"""
+    """Single file - directly disk par stream karo (no memory buffer!)"""
     file_id, local_path = args
     try:
         svc = _make_service()
         req = svc.files().get_media(fileId=file_id)
-        buf = io.BytesIO()
-        dl = MediaIoBaseDownload(buf, req, chunksize=16 * 1024 * 1024)  # 16MB chunks
-        done = False
-        while not done:
-            _, done = dl.next_chunk()
-        local_path.write_bytes(buf.getvalue())
+        # ✅ BytesIO nahi - seedha file par likhte hain
+        with open(local_path, 'wb') as f:
+            dl = MediaIoBaseDownload(f, req, chunksize=4 * 1024 * 1024)  # 4MB chunks
+            done = False
+            while not done:
+                _, done = dl.next_chunk()
         return True
     except Exception as e:
         log.warning(f"Download failed {file_id}: {e}")
+        if local_path.exists():
+            local_path.unlink()  # Incomplete file hata do
         return False
 
 def get_prefix_files_sync(prefix: str) -> list:
     cache_path = CACHE_DIR / f"p_{prefix}"
 
-    # Cache hit - already downloaded
+    # Cache hit
     if cache_path.exists():
         files = list(cache_path.glob("*.parquet"))
         if files:
@@ -247,47 +249,21 @@ def get_prefix_files_sync(prefix: str) -> list:
         entries = _prefix_index.get(prefix, [])
         if not entries: return []
 
-        log.info(f"⬇️ Parallel downloading {len(entries)} files for prefix={prefix}")
+        log.info(f"⬇️ Downloading {len(entries)} files for prefix={prefix}")
         start = time.time()
 
-        # Prepare tasks list
         tasks = [
             (file_id, cache_path / f"c{chunk_num}_{idx}.parquet")
             for idx, (chunk_num, file_id) in enumerate(entries)
         ]
 
-        # ⚡ 10 parallel threads se ek sath download karo
-        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
+        # ✅ Sirf 3 threads - memory safe for 512MB RAM
+        with _cf.ThreadPoolExecutor(max_workers=3) as ex:
             list(ex.map(_download_one, tasks))
 
         downloaded = list(cache_path.glob("*.parquet"))
         log.info(f"✅ prefix={prefix}: {len(downloaded)} files in {time.time()-start:.1f}s")
         return downloaded
-
-def prewarm_prefixes():
-    """Index ready hone ke baad background me sabhi prefixes download karo"""
-    # Wait for index to be ready
-    while not _index_built:
-        time.sleep(5)
-
-    log.info("🔥 Pre-warming prefix cache in background...")
-    # Sabse zyada files wale prefixes pehle download karo
-    sorted_prefixes = sorted(
-        _prefix_index.keys(),
-        key=lambda p: len(_prefix_index[p]),
-        reverse=True
-    )
-
-    done = 0
-    for prefix in sorted_prefixes:
-        cache_path = CACHE_DIR / f"p_{prefix}"
-        if not cache_path.exists() or not list(cache_path.glob("*.parquet")):
-            get_prefix_files_sync(prefix)
-        done += 1
-        if done % 50 == 0:
-            log.info(f"🔥 Pre-warm progress: {done}/{len(sorted_prefixes)} prefixes cached")
-
-    log.info(f"🔥 Pre-warm complete! All {done} prefixes cached.")
 
 
 # ============================================================
@@ -313,7 +289,7 @@ def get_conn():
         if _db_conn is None:
             _db_conn = duckdb.connect()
             _db_conn.execute("PRAGMA threads=2")
-            _db_conn.execute("PRAGMA memory_limit='350MB'")
+            _db_conn.execute("PRAGMA memory_limit='150MB'")  # 512MB RAM me safe
         return _db_conn
 
 def search_mobile(mobile: str):
@@ -559,7 +535,7 @@ def startup():
     threading.Thread(target=build_drive_index, daemon=True, name="DriveIndex").start()
     threading.Thread(target=run_bot, daemon=True, name="TelegramBot").start()
     threading.Thread(target=self_ping_loop, daemon=True, name="SelfPing").start()
-    threading.Thread(target=prewarm_prefixes, daemon=True, name="PreWarm").start()
+    # PreWarm disabled - 512MB RAM free tier ke liye unsafe
     log.info("✅ All background threads started!")
 
 
