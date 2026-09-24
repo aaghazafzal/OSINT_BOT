@@ -265,56 +265,109 @@ def fmt_row(row: dict, i: int, total: int) -> str:
 # ============================================================
 # 🤖 HANDLERS
 # ============================================================
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+def main_menu_kb():
+    """Main menu inline keyboard"""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔍 Search Number", switch_inline_query_current_chat=""),
+            InlineKeyboardButton("📊 Status", callback_data="cb_status"),
+        ],
+        [
+            InlineKeyboardButton("ℹ️ Help", callback_data="cb_help"),
+            InlineKeyboardButton("⚡ Speed Info", callback_data="cb_speed"),
+        ]
+    ])
+
+def result_kb():
+    """Keyboard shown after a result"""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔍 Search Again", switch_inline_query_current_chat=""),
+            InlineKeyboardButton("📊 DB Status", callback_data="cb_status"),
+        ]
+    ])
+
+def not_found_kb():
+    """Keyboard shown when number not found"""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔍 Try Another", switch_inline_query_current_chat=""),
+            InlineKeyboardButton("ℹ️ Help", callback_data="cb_help"),
+        ]
+    ])
+
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     name = update.effective_user.first_name
-    status = "✅ Ready" if _index_built else "⏳ Loading..."
+    status = "✅ Ready — Send a number!" if _index_built else "⏳ Database loading, please wait..."
     await update.message.reply_text(
-        f"👋 *Namaste {name}!*\n\n"
+        f"👋 *Welcome, {name}!*\n\n"
         "🔍 *OSINT Search Bot*\n"
-        "230GB+ Indian database!\n\n"
+        "Search 230GB+ Indian telecom database instantly!\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "📲 *Number bhejo:*\n"
-        "`9876543210` | `+919876543210`\n\n"
+        "📲 *Supported formats:*\n"
+        "`9876543210`\n"
+        "`+919876543210`\n"
+        "`919876543210`\n\n"
         f"⚡ *Status:* {status}\n"
         "━━━━━━━━━━━━━━━━━━━━━",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=main_menu_kb()
     )
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cached = list(CACHE_DIR.glob("prefix_*.parquet"))
-    size_mb = sum(f.stat().st_size for f in cached) / (1024*1024)
+    size_mb = sum(f.stat().st_size for f in cached) / (1024 * 1024)
     if _index_built:
         msg = (
-            f"✅ *Database Ready!*\n\n"
-            f"🗂 Total Prefixes: `{len(_prefix_index)}`\n"
-            f"💾 Cached: `{len(cached)}` files (`{size_mb:.0f} MB`)\n"
-            f"⚡ Cached prefixes: instant search!"
+            "✅ *Database Status: ONLINE*\n\n"
+            f"🗂 Total Prefixes Indexed: `{len(_prefix_index)}`\n"
+            f"💾 Cached Prefixes: `{len(cached)}`\n"
+            f"💿 Cache Size: `{size_mb:.0f} MB`\n\n"
+            "🟢 *Cached prefixes:* Instant search (<0.5s)\n"
+            "🟡 *New prefix:* First download (5-30s), then instant"
         )
     else:
-        msg = "⏳ *Index loading...* Thodi der baad /status check karo."
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        msg = "🔴 *Database Status: Loading...*\n\nPlease wait a moment and try again."
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔍 Search Now", switch_inline_query_current_chat=""),
+        InlineKeyboardButton("🔄 Refresh", callback_data="cb_status"),
+    ]])
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔍 Search Number", switch_inline_query_current_chat=""),
+        InlineKeyboardButton("📊 Status", callback_data="cb_status"),
+    ]])
     await update.message.reply_text(
-        "📖 *Help*\n\n"
-        "/start - Bot shuru\n"
-        "/status - Database status\n\n"
-        "📲 *Number formats:*\n"
-        "`9876543210` | `+919876543210`\n"
-        "`919876543210` | `09876543210`\n\n"
+        "📖 *How to Use*\n\n"
+        "*Commands:*\n"
+        "/start — Welcome screen\n"
+        "/status — Database status\n"
+        "/help — This guide\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "📲 *Send a mobile number:*\n"
+        "`9876543210` — 10 digits\n"
+        "`+919876543210` — with +91\n"
+        "`09876543210` — with leading 0\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
         "⚡ *Speed:*\n"
-        "• First search: 5-15s (download)\n"
-        "• Repeat search: <0.5s (cached)",
-        parse_mode=ParseMode.MARKDOWN
+        "🟢 Cached prefix → `<0.5s` instant\n"
+        "🟡 New prefix → `5-30s` first time, then instant\n\n"
+        "📚 *Library:* python-telegram-bot v20.7 (Bot API)",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb
     )
 
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
     cached = list(CACHE_DIR.glob("prefix_*.parquet"))
-    size_mb = sum(f.stat().st_size for f in cached) / (1024*1024)
+    size_mb = sum(f.stat().st_size for f in cached) / (1024 * 1024)
     await update.message.reply_text(
-        f"📊 *Admin Stats*\n\n"
+        f"🛠 *Admin Stats*\n\n"
         f"📋 Index: `{len(_prefix_index)}` prefixes\n"
         f"💾 Cached: `{len(cached)}` / `{len(_prefix_index)}`\n"
         f"💿 Cache size: `{size_mb:.1f} MB`\n"
@@ -330,7 +383,64 @@ async def cmd_clearcache(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     global _db_conn
     _db_conn = None
-    await update.message.reply_text("✅ Cache cleared!")
+    await update.message.reply_text("✅ Cache cleared successfully!")
+
+async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle inline button presses"""
+    q = update.callback_query
+    await q.answer()
+    data = q.data
+
+    if data == "cb_status":
+        cached = list(CACHE_DIR.glob("prefix_*.parquet"))
+        size_mb = sum(f.stat().st_size for f in cached) / (1024 * 1024)
+        if _index_built:
+            msg = (
+                "✅ *Database Status: ONLINE*\n\n"
+                f"🗂 Total Prefixes Indexed: `{len(_prefix_index)}`\n"
+                f"💾 Cached Prefixes: `{len(cached)}`\n"
+                f"💿 Cache Size: `{size_mb:.0f} MB`\n\n"
+                "🟢 *Cached:* Instant  |  🟡 *New:* 5-30s first time"
+            )
+        else:
+            msg = "🔴 *Database Status: Loading...*\n\nWait a moment and try again."
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔍 Search Now", switch_inline_query_current_chat=""),
+            InlineKeyboardButton("🔄 Refresh", callback_data="cb_status"),
+        ]])
+        await q.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
+
+    elif data == "cb_help":
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔍 Search Number", switch_inline_query_current_chat=""),
+            InlineKeyboardButton("📊 Status", callback_data="cb_status"),
+        ]])
+        await q.edit_message_text(
+            "📖 *How to Use*\n\n"
+            "Just send any Indian mobile number:\n"
+            "`9876543210` | `+919876543210`\n\n"
+            "🟢 Cached → Instant\n"
+            "🟡 New prefix → 5-30s first time\n\n"
+            "📚 Library: python-telegram-bot v20.7",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb
+        )
+
+    elif data == "cb_speed":
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("◀️ Back", callback_data="cb_help"),
+        ]])
+        await q.edit_message_text(
+            "⚡ *Speed Information*\n\n"
+            "🟢 *Cached prefix:* `< 0.5 seconds`\n"
+            "   Numbers you've searched before\n\n"
+            "🟡 *New prefix (first time):* `5-30 seconds`\n"
+            "   Downloads data from Google Drive\n\n"
+            "🔄 *After restart:* Index rebuilds in ~30s\n"
+            "   Cached files persist during session",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb
+        )
 
 async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -339,45 +449,78 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     limited, wait = is_limited(uid)
     if limited:
         await update.message.reply_text(
-            f"⏳ Ruko! `{wait}s` baad try karo.", parse_mode=ParseMode.MARKDOWN)
+            f"⏳ *Rate limit reached!*\nPlease wait `{wait}s` before searching again.",
+            parse_mode=ParseMode.MARKDOWN)
         return
 
     mobile = normalize(text)
     if not mobile:
         if update.message.chat.type == "private":
             await update.message.reply_text(
-                "⚠️ *Sahi number format nahi!*\nExample: `9876543210`",
-                parse_mode=ParseMode.MARKDOWN)
+                "⚠️ *Invalid format!*\n\n"
+                "Please send a valid Indian mobile number:\n"
+                "`9876543210` | `+919876543210`",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("ℹ️ Help", callback_data="cb_help")
+                ]])
+            )
         return
 
     if not _index_built:
         await update.message.reply_text(
-            "⏳ *Database load ho raha hai...*\nThodi der baad try karo!",
-            parse_mode=ParseMode.MARKDOWN)
+            "🔴 *Database is loading...*\n\n"
+            "Please wait a moment and try again.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔄 Check Status", callback_data="cb_status")
+            ]])
+        )
         return
 
     status_msg = await update.message.reply_text(
-        f"🔍 Searching `{mobile}`...", parse_mode=ParseMode.MARKDOWN)
+        f"🔍 *Searching* `{mobile}`*...*", parse_mode=ParseMode.MARKDOWN)
 
     loop = asyncio.get_event_loop()
     results, elapsed = await loop.run_in_executor(None, search_mobile, mobile)
 
     if not results:
         await status_msg.edit_text(
-            f"❌ *Not Found*\n\n`{mobile}` database mein nahi hai.\n_({elapsed:.2f}s)_",
-            parse_mode=ParseMode.MARKDOWN)
+            f"❌ *No Records Found*\n\n"
+            f"📱 `{mobile}` is not in our database.\n"
+            f"_Search completed in {elapsed:.2f}s_",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=not_found_kb()
+        )
         return
 
     total = len(results)
-    header = f"✅ *{total} Record{'s' if total>1 else ''} Found!* ⚡`{elapsed:.2f}s`\n━━━━━━━━━━━━━━━━━━━━━\n"
-    await status_msg.edit_text(
-        header + fmt_row(results[0], 1, total), parse_mode=ParseMode.MARKDOWN)
+    header = (
+        f"✅ *{total} Record{'s' if total > 1 else ''} Found!*  "
+        f"⚡ `{elapsed:.2f}s`\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    # Last record gets the keyboard, first records don't
+    if total == 1:
+        await status_msg.edit_text(
+            header + fmt_row(results[0], 1, total),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=result_kb()
+        )
+    else:
+        await status_msg.edit_text(
+            header + fmt_row(results[0], 1, total),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        for i, row in enumerate(results[1:], 2):
+            is_last = (i == total)
+            await update.message.reply_text(
+                "━━━━━━━━━━━━━━━━━━━━━\n" + fmt_row(row, i, total),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=result_kb() if is_last else None
+            )
+            await asyncio.sleep(0.3)
 
-    for i, row in enumerate(results[1:], 2):
-        await update.message.reply_text(
-            "━━━━━━━━━━━━━━━━━━━━━\n" + fmt_row(row, i, total),
-            parse_mode=ParseMode.MARKDOWN)
-        await asyncio.sleep(0.3)
 
 # ============================================================
 # 🚀 FLASK + BOT + STARTUP
@@ -415,17 +558,25 @@ def self_ping_loop():
 def run_bot():
     log.info("🤖 Starting bot...")
     async def _run():
+        from telegram.ext import CallbackQueryHandler
         app = Application.builder().token(BOT_TOKEN).build()
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("help", cmd_help))
         app.add_handler(CommandHandler("stats", cmd_stats))
         app.add_handler(CommandHandler("clearcache", cmd_clearcache))
+        app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
         await app.initialize()
         await app.start()
         await app.updater.start_polling(
-            drop_pending_updates=True, allowed_updates=["message"])
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]
+        )
+        log.info("✅ Bot polling started!")
+        while True:
+            await asyncio.sleep(60)
+
         log.info("✅ Bot polling started!")
         while True:
             await asyncio.sleep(60)
