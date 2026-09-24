@@ -378,6 +378,39 @@ async def cmd_clearcache(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     _db_conn = None
     await update.message.reply_text("✅ Cache cleared!")
 
+async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📖 *Help*\n\n"
+        "/start - Bot shuru karo\n"
+        "/status - Database ki live status\n"
+        "/help - Ye menu\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "📲 *Number formats:*\n"
+        "`9876543210` ← 10 digit\n"
+        "`+919876543210` ← with +91\n"
+        "`919876543210` ← with 91\n"
+        "`09876543210` ← with 0\n\n"
+        "⚡ First search: 5-15s (download)\n"
+        "⚡ Repeat search: 0.1-0.5s (cache)",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if _index_built:
+        msg = (
+            "✅ *Database Ready!*\n\n"
+            f"🗂 Indexed Prefixes: `{len(_prefix_index)}`\n"
+            "⚡ Ab koi bhi number search karo!"
+        )
+    else:
+        msg = (
+            "⏳ *Database Index Build Ho Raha Hai...*\n\n"
+            f"📊 Progress: `{len(_prefix_index)}` prefixes indexed so far\n"
+            "🕐 Thodi der aur ruko (2-5 min)\n\n"
+            "_Jab ready hoga, /status check karo!_"
+        )
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
 async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text.strip()
@@ -426,6 +459,26 @@ flask_app = Flask(__name__)
 def health():
     return {"status": "ok", "index_built": _index_built, "prefixes": len(_prefix_index)}, 200
 
+@flask_app.route("/ping")
+def ping():
+    return "pong", 200
+
+def self_ping_loop():
+    """Render free tier ko sleep hone se rokta hai - har 5 min me self ping"""
+    import urllib.request
+    RENDER_URL = os.environ.get("WEBHOOK_URL", "").rstrip("/")
+    if not RENDER_URL:
+        log.warning("⚠️ WEBHOOK_URL not set, self-ping disabled")
+        return
+    log.info(f"🏓 Self-ping started: {RENDER_URL}/ping every 5 min")
+    while True:
+        time.sleep(300)  # 5 minutes
+        try:
+            urllib.request.urlopen(f"{RENDER_URL}/ping", timeout=10)
+            log.info("🏓 Self-ping OK")
+        except Exception as e:
+            log.warning(f"🏓 Self-ping failed: {e}")
+
 def run_bot():
     """Bot polling - background thread me chalta hai (no signal handlers)"""
     log.info("🤖 Starting bot polling...")
@@ -433,19 +486,19 @@ def run_bot():
     async def _run():
         app = Application.builder().token(BOT_TOKEN).build()
         app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("help", cmd_help))
         app.add_handler(CommandHandler("stats", cmd_stats))
+        app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("clearcache", cmd_clearcache))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
 
         await app.initialize()
         await app.start()
-        # run_polling() ki jagah direct updater use karo (signal handlers nahi lagate)
         await app.updater.start_polling(
             drop_pending_updates=True,
             allowed_updates=["message"]
         )
         log.info("✅ Bot polling started successfully!")
-        # Forever run karo
         while True:
             await asyncio.sleep(60)
 
@@ -460,10 +513,9 @@ def run_bot():
 def startup():
     """Gunicorn import hone par automatically chalta hai"""
     log.info("🚀 Initializing OSINT Bot...")
-    # Drive index background thread
     threading.Thread(target=build_drive_index, daemon=True, name="DriveIndex").start()
-    # Bot polling background thread
     threading.Thread(target=run_bot, daemon=True, name="TelegramBot").start()
+    threading.Thread(target=self_ping_loop, daemon=True, name="SelfPing").start()
     log.info("✅ All background threads started!")
 
 # Gunicorn jab bhi main.py import kare, startup chalega
