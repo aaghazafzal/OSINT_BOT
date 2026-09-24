@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from collections import defaultdict
 import concurrent.futures as _cf
+import encodings.idna  # Fix: Werkzeug IDNA encoding issue
 
 import duckdb
 from telegram import Update
