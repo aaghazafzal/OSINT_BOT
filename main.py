@@ -337,6 +337,30 @@ async def enforce_sub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
         return False
     return True
 
+
+ABOUT_TEXT = (
+    "🚀 <b><a href='https://t.me/OSINT_UNIVORABOT'>OSINT BOT [UNIVORA]</a></b>\n"
+    "An advanced intelligence tool designed for ultra-fast telecom record lookup.\n\n"
+    "⚙️ <b>Tech Stack:</b>\n"
+    "• <b>Language:</b> <a href='https://www.python.org/'>Python 3</a>\n"
+    "• <b>Library:</b> <a href='https://python-telegram-bot.org/'>python-telegram-bot</a>\n"
+    "• <b>Engine:</b> <a href='https://duckdb.org/'>DuckDB</a>\n\n"
+    "🛡 <b>Powered by <a href='https://univora.website'>Univora Platform</a></b>\n"
+    "A next-generation ecosystem for intelligence and automation.\n\n"
+    "👨‍💻 <b>Developer:</b> <a href='https://t.me/ROLEX_SIIR'>@ROLEX_SIIR</a>"
+)
+
+def about_kb():
+    return InlineKeyboardMarkup([
+        [
+            btn("🌐 Univora Website", url="https://univora.website"),
+            btn("👨‍💻 Developer", url="https://t.me/ROLEX_SIIR")
+        ],
+        [
+            btn("🔙 Back", cd="cb_start", style=KeyboardButtonStyle.PRIMARY)
+        ]
+    ])
+
 def main_menu_kb(is_admin=False):
     """Main menu inline keyboard"""
     row1 = [btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS)]
@@ -347,7 +371,8 @@ def main_menu_kb(is_admin=False):
         btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY),
         btn("⚡ Speed Info", cd="cb_speed", style=KeyboardButtonStyle.PRIMARY),
     ]
-    return InlineKeyboardMarkup([row1, row2])
+    row3 = [btn("🚀 About Univora", cd="cb_about", style=KeyboardButtonStyle.PRIMARY)]
+    return InlineKeyboardMarkup([row1, row2, row3])
 
 def not_found_kb(is_admin=False):
     """Keyboard shown when number not found"""
@@ -381,6 +406,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(is_admin), disable_web_page_preview=True)
+
+async def cmd_about(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await enforce_sub(update, ctx):
+        return
+    await update.message.reply_text(ABOUT_TEXT, parse_mode=ParseMode.HTML, reply_markup=about_kb(), disable_web_page_preview=True)
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
@@ -537,6 +567,28 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "📚 Library: python-telegram-bot v22.8"
         )
         await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+    elif data == "cb_about":
+        await q.edit_message_text(ABOUT_TEXT, parse_mode=ParseMode.HTML, reply_markup=about_kb(), disable_web_page_preview=True)
+
+    elif data == "cb_start":
+        user = update.effective_user
+        name = user.first_name
+        name = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if name else "User"
+        status = "✅ Ready — Send a number!" if _index_built else "⏳ Database loading, please wait..."
+        text = (
+            f"👋 <b>Welcome, <a href='tg://user?id={uid}'>{name}</a>!</b>\n\n"
+            "🔍 <b><a href='https://t.me/OSINT_UNIVORABOT'>OSINT BOT [UNIVORA]</a></b>\n"
+            "A powerful intelligence tool to analyze and verify telecom records instantly.\n\n"
+            "┏━━━━━━━━━━━━━━━━━━━━\n"
+            "📲 <b>Supported formats:</b>\n"
+            "<code>9876543210</code>\n"
+            "<code>+919876543210</code>\n"
+            "<code>919876543210</code>\n\n"
+            f"⚡ <b>Status:</b> {status}\n"
+            "┗━━━━━━━━━━━━━━━━━━━━"
+        )
+        await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(is_admin), disable_web_page_preview=True)
 
     elif data == "cb_speed":
         kb = InlineKeyboardMarkup([
@@ -696,6 +748,7 @@ def run_bot():
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("help", cmd_help))
+        app.add_handler(CommandHandler("about", cmd_about))
         app.add_handler(CommandHandler("stats", cmd_stats))
         app.add_handler(CommandHandler("clearcache", cmd_clearcache))
         app.add_handler(CallbackQueryHandler(handle_callback))
@@ -709,7 +762,8 @@ def run_bot():
             await app.bot.set_my_commands([
                 BotCommand("start", "Restart the bot and show main menu"),
                 BotCommand("status", "Check database index and cache status"),
-                BotCommand("help", "Show guide and formatting rules")
+                BotCommand("help", "Show guide and formatting rules"),
+                BotCommand("about", "About Univora Bot and Developer")
             ])
             log.info("✅ Bot menu commands updated!")
         except Exception as e:
