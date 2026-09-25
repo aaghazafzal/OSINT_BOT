@@ -62,6 +62,8 @@ def _raw_send(chat_id, text, keyboard: list, parse_mode="Markdown", reply_to=Non
         r = _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                       json=payload, timeout=15)
         data = r.json()
+        if not data.get("ok"):
+            log.error(f"Telegram API Error (raw_send): {data}")
         return data.get("result", {}).get("message_id")
     except Exception as e:
         log.warning(f"raw_send error: {e}")
@@ -76,8 +78,11 @@ def _raw_edit(chat_id, msg_id, text, keyboard: list, parse_mode="Markdown"):
         "reply_markup": {"inline_keyboard": keyboard},
     }
     try:
-        _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+        r = _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
                   json=payload, timeout=15)
+        data = r.json()
+        if not data.get("ok"):
+            log.error(f"Telegram API Error (raw_edit): {data}")
     except Exception as e:
         log.warning(f"raw_edit error: {e}")
 
@@ -94,8 +99,7 @@ def _build_result_kb(found=True):
         {"text": "🔍 Search Another Number", "switch_inline_query_current_chat": ""},
         {
             "text": "✅ Match Found!" if found else "❌ No Record",
-            "callback_data": "cb_noop",
-            "style": "bg_success" if found else "bg_danger",
+            "callback_data": "cb_noop"
         }
     ]
     keyboard = [row1]
@@ -107,8 +111,7 @@ def _build_result_kb(found=True):
     else:
         keyboard.append([{
             "text": "📊 Database Status",
-            "callback_data": "cb_status",
-            "style": "bg_primary",
+            "callback_data": "cb_status"
         }])
     return keyboard
 
@@ -116,7 +119,7 @@ def _build_searching_kb():
     """Keyboard shown while searching"""
     if MINI_APP_URL:
         return [[{"text": "🎮 Play While Searching...", "web_app": {"url": MINI_APP_URL}}]]
-    return [[{"text": "⏳ Searching...", "callback_data": "cb_noop", "style": "bg_primary"}]]
+    return [[{"text": "⏳ Searching...", "callback_data": "cb_noop"}]]
 
 
 # ============================================================
@@ -350,11 +353,11 @@ def main_menu_kb():
     return [
         [
             {"text": "🔍 Search Number", "switch_inline_query_current_chat": ""},
-            {"text": "📊 Status", "callback_data": "cb_status", "style": "bg_primary"},
+            {"text": "📊 Status", "callback_data": "cb_status"},
         ],
         [
-            {"text": "ℹ️ Help", "callback_data": "cb_help", "style": "bg_primary"},
-            {"text": "⚡ Speed Info", "callback_data": "cb_speed", "style": "bg_primary"},
+            {"text": "ℹ️ Help", "callback_data": "cb_help"},
+            {"text": "⚡ Speed Info", "callback_data": "cb_speed"},
         ]
     ]
 
@@ -363,12 +366,13 @@ def not_found_kb():
     return [
         [
             {"text": "🔍 Try Another", "switch_inline_query_current_chat": ""},
-            {"text": "ℹ️ Help", "callback_data": "cb_help", "style": "bg_primary"},
+            {"text": "ℹ️ Help", "callback_data": "cb_help"},
         ]
     ]
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     name = update.effective_user.first_name
+    name = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if name else "User"
     status = "✅ Ready — Send a number!" if _index_built else "⏳ Database loading, please wait..."
     text = (
         f"👋 <b>Welcome, {name}!</b>\n\n"
@@ -401,14 +405,14 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     kb = [[
         {"text": "🔍 Search Now", "switch_inline_query_current_chat": ""},
-        {"text": "🔄 Refresh", "callback_data": "cb_status", "style": "bg_primary"}
+        {"text": "🔄 Refresh", "callback_data": "cb_status"}
     ]]
     _raw_send(update.effective_chat.id, msg, kb, parse_mode="HTML")
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb = [[
         {"text": "🔍 Search Number", "switch_inline_query_current_chat": ""},
-        {"text": "📊 Status", "callback_data": "cb_status", "style": "bg_primary"}
+        {"text": "📊 Status", "callback_data": "cb_status"}
     ]]
     msg = (
         "📖 <b>How to Use</b>\n\n"
@@ -481,14 +485,14 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             msg = "🔴 <b>Database Status: Loading...</b>\n\nWait a moment and try again."
         kb = [[
             {"text": "🔍 Search Now", "switch_inline_query_current_chat": ""},
-            {"text": "🔄 Refresh", "callback_data": "cb_status", "style": "bg_primary"}
+            {"text": "🔄 Refresh", "callback_data": "cb_status"}
         ]]
         _raw_edit(chat_id, msg_id, msg, kb, parse_mode="HTML")
 
     elif data == "cb_help":
         kb = [[
             {"text": "🔍 Search Number", "switch_inline_query_current_chat": ""},
-            {"text": "📊 Status", "callback_data": "cb_status", "style": "bg_primary"}
+            {"text": "📊 Status", "callback_data": "cb_status"}
         ]]
         msg = (
             "📖 <b>How to Use</b>\n\n"
@@ -502,7 +506,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif data == "cb_speed":
         kb = [[
-            {"text": "◀️ Back", "callback_data": "cb_help", "style": "bg_primary"}
+            {"text": "◀️ Back", "callback_data": "cb_help"}
         ]]
         msg = (
             "⚡ <b>Speed Information</b>\n\n"
