@@ -632,6 +632,7 @@ def run_bot():
     log.info("🤖 Starting bot...")
     async def _run():
         from telegram.ext import CallbackQueryHandler
+        from telegram import BotCommand
         app = Application.builder().token(BOT_TOKEN).build()
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("status", cmd_status))
@@ -640,8 +641,21 @@ def run_bot():
         app.add_handler(CommandHandler("clearcache", cmd_clearcache))
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+        
         await app.initialize()
         await app.start()
+        
+        # Set the command menu
+        try:
+            await app.bot.set_my_commands([
+                BotCommand("start", "Restart the bot and show main menu"),
+                BotCommand("status", "Check database index and cache status"),
+                BotCommand("help", "Show guide and formatting rules")
+            ])
+            log.info("✅ Bot menu commands updated!")
+        except Exception as e:
+            log.warning(f"⚠️ Failed to set bot commands: {e}")
+            
         await app.updater.start_polling(
             drop_pending_updates=True,
             allowed_updates=["message", "callback_query"]
