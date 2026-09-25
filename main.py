@@ -518,6 +518,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "<code>919876543210</code>\n\n"
                 f"⚡ <b>Status:</b> {status}\n"
                 "┗━━━━━━━━━━━━━━━━━━━━"
+        "\n⚠️ <i>Searches may take 2-3 mins. 100% Free!</i>"
             )
             await q.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(is_admin), disable_web_page_preview=True)
         else:
@@ -587,6 +588,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<code>919876543210</code>\n\n"
             f"⚡ <b>Status:</b> {status}\n"
             "┗━━━━━━━━━━━━━━━━━━━━"
+        "\n⚠️ <i>Searches may take 2-3 mins. 100% Free!</i>"
         )
         await q.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(is_admin), disable_web_page_preview=True)
 
@@ -655,7 +657,8 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "⚡ Initializing secure lookup...\n"
         "🔐 Querying intelligence network...\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>🕐 Please wait while we fetch the records.</i>"
+        "⚠️ <i>Please wait... it may take 2-3 minutes.</i>\n"
+        "💎 <i>100% Free Service!</i>"
     )
     search_msg = await update.message.reply_text(
         search_text,
