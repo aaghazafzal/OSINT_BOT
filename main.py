@@ -724,6 +724,60 @@ def health():
         "cached": cached
     }, 200
 
+
+_ip_calls = {}
+_ip_lock = threading.Lock()
+
+def check_rate_limit(ip):
+    now = time.time()
+    with _ip_lock:
+        if ip not in _ip_calls:
+            _ip_calls[ip] = []
+        _ip_calls[ip] = [t for t in _ip_calls[ip] if now - t < 60]
+        if len(_ip_calls[ip]) >= MAX_REQ_PER_MIN:
+            return False
+        _ip_calls[ip].append(now)
+        return True
+
+from flask import request, jsonify
+
+@flask_app.route("/api/search", methods=["POST", "OPTIONS"])
+def api_search():
+    if request.method == "OPTIONS":
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "3600"
+        }
+        return ("", 204, headers)
+
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if client_ip: client_ip = client_ip.split(",")[0].strip()
+    else: client_ip = "unknown"
+
+    if not check_rate_limit(client_ip):
+        return jsonify({"error": "Rate limit exceeded. Please wait a minute."}), 429, {"Access-Control-Allow-Origin": "*"}
+    
+    data = request.json or {}
+    mobile = data.get("mobile", "").strip()
+    mobile = normalize(mobile)
+    if not mobile:
+        return jsonify({"error": "Invalid mobile number format."}), 400, {"Access-Control-Allow-Origin": "*"}
+        
+    if not _index_built:
+        return jsonify({"error": "Database is loading. Please try again in a minute."}), 503, {"Access-Control-Allow-Origin": "*"}
+
+    try:
+        results, elapsed = search_mobile(mobile)
+        return jsonify({
+            "success": True,
+            "results": results,
+            "elapsed": elapsed
+        }), 200, {"Access-Control-Allow-Origin": "*"}
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500, {"Access-Control-Allow-Origin": "*"}
+
 @flask_app.route("/ping")
 def ping():
     return "pong", 200
