@@ -59,7 +59,7 @@ def btn(text: str, *, cd: str = None, url: str = None, web_app_url: str = None, 
     if style is not None: kwargs["style"] = style
     return InlineKeyboardButton(**kwargs)
 
-def _build_result_kb(found=True):
+def _build_result_kb(found=True, is_admin=False):
     """Colored keyboard - green for found, red for not found"""
     btn_status = btn("✅ Match Found!", cd="cb_noop", style=KeyboardButtonStyle.SUCCESS) if found else btn("❌ No Record", cd="cb_noop", style=KeyboardButtonStyle.DANGER)
     
@@ -71,7 +71,8 @@ def _build_result_kb(found=True):
     ]
     if MINI_APP_URL:
         keyboard.append([btn("🎮 Play Mini Game", web_app_url=MINI_APP_URL)])
-    else:
+    
+    if is_admin:
         keyboard.append([btn("📊 Database Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)])
         
     return InlineKeyboardMarkup(keyboard)
@@ -309,33 +310,33 @@ def fmt_row(row: dict, i: int, total: int) -> str:
 # ============================================================
 # 🤖 HANDLERS
 # ============================================================
-def main_menu_kb():
+def main_menu_kb(is_admin=False):
     """Main menu inline keyboard"""
-    return InlineKeyboardMarkup([
-        [
-            btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
-            btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY),
-        ],
-        [
-            btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY),
-            btn("⚡ Speed Info", cd="cb_speed", style=KeyboardButtonStyle.PRIMARY),
-        ]
-    ])
+    row1 = [btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS)]
+    if is_admin:
+        row1.append(btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY))
+    
+    row2 = [
+        btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY),
+        btn("⚡ Speed Info", cd="cb_speed", style=KeyboardButtonStyle.PRIMARY),
+    ]
+    return InlineKeyboardMarkup([row1, row2])
 
-def not_found_kb():
+def not_found_kb(is_admin=False):
     """Keyboard shown when number not found"""
-    return InlineKeyboardMarkup([
-        [
-            btn("🔍 Try Another", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
-            btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY),
-        ]
-    ])
+    row1 = [btn("🔍 Try Another", switch_inline="", style=KeyboardButtonStyle.SUCCESS)]
+    if is_admin:
+        row1.append(btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY))
+    
+    row2 = [btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY)]
+    return InlineKeyboardMarkup([row1, row2])
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     name = user.first_name
     name = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if name else "User"
     uid = user.id
+    is_admin = uid in ADMIN_IDS
     
     status = "✅ Ready — Send a number!" if _index_built else "⏳ Database loading, please wait..."
     text = (
@@ -350,9 +351,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"⚡ <b>Status:</b> {status}\n"
         "━━━━━━━━━━━━━━━━━━━━━"
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(), disable_web_page_preview=True)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(is_admin), disable_web_page_preview=True)
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
     cached = list(CACHE_DIR.glob("prefix_*.parquet"))
     size_mb = sum(f.stat().st_size for f in cached) / (1024 * 1024)
     if _index_built:
@@ -376,27 +379,27 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    kb = InlineKeyboardMarkup([
-        [
-            btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
-            btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
-        ]
-    ])
+    is_admin = update.effective_user.id in ADMIN_IDS
+    row1 = [btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS)]
+    if is_admin:
+        row1.append(btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY))
+    
+    kb = InlineKeyboardMarkup([row1])
     msg = (
         "📖 <b>How to Use</b>\n\n"
         "<b>Commands:</b>\n"
         "/start — Welcome screen\n"
-        "/status — Database status\n"
-        "/help — This guide\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "/help — This guide\n"
+        + ("/status — Database status\n" if is_admin else "") +
+        "\n━━━━━━━━━━━━━━━━━━━━━\n"
         "📲 <b>Send a mobile number:</b>\n"
         "<code>9876543210</code> — 10 digits\n"
         "<code>+919876543210</code> — with +91\n"
         "<code>09876543210</code> — with leading 0\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "⚡ <b>Speed:</b>\n"
-        "🟢 Cached prefix → <code>&lt;0.5s</code> instant\n"
-        "🟡 New prefix → <code>5-30s</code> first time, then instant\n\n"
+        "🟢 Fast lookup → <code>&lt;0.5s</code>\n"
+        "🟡 Deep search → <code>5-30s</code>\n\n"
         "📚 <b>Library:</b> python-telegram-bot v22.8"
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -437,8 +440,14 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     chat_id = q.message.chat.id
     msg_id = q.message.message_id
+    uid = update.effective_user.id
+    is_admin = uid in ADMIN_IDS
 
     if data == "cb_status":
+        if not is_admin:
+            await q.answer("⚠️ This button is restricted to Admins only.", show_alert=True)
+            return
+            
         cached = list(CACHE_DIR.glob("prefix_*.parquet"))
         size_mb = sum(f.stat().st_size for f in cached) / (1024 * 1024)
         if _index_built:
@@ -460,18 +469,17 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
     elif data == "cb_help":
-        kb = InlineKeyboardMarkup([
-            [
-                btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
-                btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
-            ]
-        ])
+        row1 = [btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS)]
+        if is_admin:
+            row1.append(btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY))
+            
+        kb = InlineKeyboardMarkup([row1])
         msg = (
             "📖 <b>How to Use</b>\n\n"
             "Just send any Indian mobile number:\n"
             "<code>9876543210</code> | <code>+919876543210</code>\n\n"
-            "🟢 Cached → Instant\n"
-            "🟡 New prefix → 5-30s first time\n\n"
+            "🟢 Fast lookup → Instant\n"
+            "🟡 Deep search → 5-30s first time\n\n"
             "📚 Library: python-telegram-bot v22.8"
         )
         await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -484,12 +492,10 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ])
         msg = (
             "⚡ <b>Speed Information</b>\n\n"
-            "🟢 <b>Cached prefix:</b> <code>&lt; 0.5 seconds</code>\n"
-            "   Numbers you've searched before\n\n"
-            "🟡 <b>New prefix (first time):</b> <code>5-30 seconds</code>\n"
-            "   Downloads data from Google Drive\n\n"
-            "🔄 <b>After restart:</b> Index rebuilds in ~30s\n"
-            "   Cached files persist during session"
+            "🟢 <b>Fast Lookup:</b> <code>&lt; 0.5 seconds</code>\n"
+            "   For frequently searched networks.\n\n"
+            "🟡 <b>Deep Search:</b> <code>5-30 seconds</code>\n"
+            "   For querying fresh records."
         )
         await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
@@ -497,6 +503,7 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid     = update.effective_user.id
     chat_id = update.effective_chat.id
     text    = update.message.text.strip()
+    is_admin = uid in ADMIN_IDS
 
     limited, wait = is_limited(uid)
     if limited:
@@ -509,24 +516,22 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not mobile:
         if update.message.chat.type == "private":
             await update.message.reply_text(
-                "⚠️ *Invalid Number Format!*\n\n"
+                "⚠️ <b>Invalid Number Format!</b>\n\n"
                 "Please send a valid Indian mobile number:\n"
-                "`9876543210`\n`+919876543210`\n`919876543210`",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("ℹ️ Help", callback_data="cb_help")
-                ]])
+                "<code>9876543210</code>\n<code>+919876543210</code>\n<code>919876543210</code>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=not_found_kb(is_admin)
             )
         return
 
     if not _index_built:
         await update.message.reply_text(
-            "🔴 *Database is loading...*\n\n"
+            "🔴 <b>Database is loading...</b>\n\n"
             "Please wait a moment and try again.\n"
-            "_Usually ready within 1-2 minutes after restart._",
-            parse_mode=ParseMode.MARKDOWN,
+            "<i>Usually ready within 1-2 minutes after restart.</i>",
+            parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔄 Check Status", callback_data="cb_status")
+                btn("🔄 Check Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
             ]])
         )
         return
@@ -539,12 +544,10 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"🔍 <b>Searching Database...</b>\n\n"
         f"📱 <b>Number:</b> <code>{mobile}</code>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚡ Scanning <b>230GB+</b> telecom records\n"
-        "🛰 Querying across <b>87 data chunks</b>\n"
-        "🔐 Secure encrypted lookup in progress\n"
+        "⚡ Initializing secure lookup...\n"
+        "🔐 Querying intelligence network...\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>🕐 New numbers take 5-30s to fetch.</i>\n"
-        "<i>Previously searched numbers are instant!</i>"
+        "<i>🕐 Please wait while we fetch the records.</i>"
     )
     search_msg = await update.message.reply_text(
         search_text,
@@ -569,7 +572,7 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"⏱ Completed in <code>{elapsed:.2f}s</code>\n"
             "Try a different number or check the format."
         )
-        await search_msg.edit_text(not_found, reply_markup=_build_result_kb(found=False), parse_mode=ParseMode.HTML)
+        await search_msg.edit_text(not_found, reply_markup=_build_result_kb(found=False, is_admin=is_admin), parse_mode=ParseMode.HTML)
         return
 
     total  = len(results)
@@ -591,7 +594,7 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
     final_text = header + body
 
-    await search_msg.edit_text(final_text, reply_markup=_build_result_kb(found=True), parse_mode=ParseMode.HTML)
+    await search_msg.edit_text(final_text, reply_markup=_build_result_kb(found=True, is_admin=is_admin), parse_mode=ParseMode.HTML)
 
 
 
