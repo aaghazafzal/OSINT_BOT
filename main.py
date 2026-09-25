@@ -179,6 +179,17 @@ def _get_dl_lock(prefix):
 
 def get_prefix_file(prefix: str):
     """Download 1 merged parquet file for this prefix. Return local path."""
+    global _prefix_index, _index_built
+    
+    # Lazy load index if empty
+    if not _prefix_index and INDEX_CACHE_FILE.exists():
+        try:
+            import json
+            _prefix_index = json.loads(INDEX_CACHE_FILE.read_text())
+            _index_built = True
+        except Exception as e:
+            pass
+
     cache_path = CACHE_DIR / f"prefix_{prefix}.parquet"
 
     if cache_path.exists() and cache_path.stat().st_size > 0:
