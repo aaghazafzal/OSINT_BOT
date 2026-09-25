@@ -44,82 +44,43 @@ logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=lo
 log = logging.getLogger(__name__)
 
 # ============================================================
-# 📡 RAW BOT API — Colored Buttons (Bot API 9.4+ style param)
+# 📡 KEYBOARDS (Colored Buttons via PTB 22.8+)
 # ============================================================
-import requests as _req
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import KeyboardButtonStyle
 
-def _raw_send(chat_id, text, keyboard: list, parse_mode="Markdown", reply_to=None):
-    """Send message with colored buttons via raw Bot API"""
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": parse_mode,
-        "reply_markup": {"inline_keyboard": keyboard},
-    }
-    if reply_to:
-        payload["reply_to_message_id"] = reply_to
-    try:
-        r = _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                      json=payload, timeout=15)
-        data = r.json()
-        if not data.get("ok"):
-            log.error(f"Telegram API Error (raw_send): {data}")
-        return data.get("result", {}).get("message_id")
-    except Exception as e:
-        log.warning(f"raw_send error: {e}")
-        return None
-
-def _raw_edit(chat_id, msg_id, text, keyboard: list, parse_mode="Markdown"):
-    payload = {
-        "chat_id": chat_id,
-        "message_id": msg_id,
-        "text": text,
-        "parse_mode": parse_mode,
-        "reply_markup": {"inline_keyboard": keyboard},
-    }
-    try:
-        r = _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-                  json=payload, timeout=15)
-        data = r.json()
-        if not data.get("ok"):
-            log.error(f"Telegram API Error (raw_edit): {data}")
-    except Exception as e:
-        log.warning(f"raw_edit error: {e}")
-
-def _raw_delete(chat_id, msg_id):
-    try:
-        _req.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
-                  json={"chat_id": chat_id, "message_id": msg_id}, timeout=10)
-    except Exception as e:
-        log.warning(f"raw_delete error: {e}")
+def btn(text: str, *, cd: str = None, url: str = None, web_app_url: str = None, switch_inline: str = None, style=None) -> InlineKeyboardButton:
+    """Helper to create InlineKeyboardButton with styles"""
+    kwargs = {"text": text}
+    if cd is not None: kwargs["callback_data"] = cd
+    if url is not None: kwargs["url"] = url
+    if web_app_url is not None: kwargs["web_app"] = {"url": web_app_url}
+    if switch_inline is not None: kwargs["switch_inline_query_current_chat"] = switch_inline
+    if style is not None: kwargs["style"] = style
+    return InlineKeyboardButton(**kwargs)
 
 def _build_result_kb(found=True):
     """Colored keyboard - green for found, red for not found"""
-    row1 = [
-        {"text": "🔍 Search Another Number", "switch_inline_query_current_chat": ""},
-        {
-            "text": "✅ Match Found!" if found else "❌ No Record",
-            "callback_data": "cb_noop"
-        }
+    btn_status = btn("✅ Match Found!", cd="cb_noop", style=KeyboardButtonStyle.SUCCESS) if found else btn("❌ No Record", cd="cb_noop", style=KeyboardButtonStyle.DANGER)
+    
+    keyboard = [
+        [
+            btn("🔍 Search Another Number", switch_inline=""),
+            btn_status
+        ]
     ]
-    keyboard = [row1]
     if MINI_APP_URL:
-        keyboard.append([{
-            "text": "🎮 Play Mini Game",
-            "web_app": {"url": MINI_APP_URL}
-        }])
+        keyboard.append([btn("🎮 Play Mini Game", web_app_url=MINI_APP_URL)])
     else:
-        keyboard.append([{
-            "text": "📊 Database Status",
-            "callback_data": "cb_status"
-        }])
-    return keyboard
+        keyboard.append([btn("📊 Database Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)])
+        
+    return InlineKeyboardMarkup(keyboard)
 
 def _build_searching_kb():
     """Keyboard shown while searching"""
     if MINI_APP_URL:
-        return [[{"text": "🎮 Play While Searching...", "web_app": {"url": MINI_APP_URL}}]]
-    return [[{"text": "⏳ Searching...", "callback_data": "cb_noop"}]]
+        return InlineKeyboardMarkup([[btn("🎮 Play While Searching...", web_app_url=MINI_APP_URL)]])
+    return InlineKeyboardMarkup([[btn("⏳ Searching...", cd="cb_noop", style=KeyboardButtonStyle.PRIMARY)]])
 
 
 # ============================================================
@@ -349,26 +310,26 @@ def fmt_row(row: dict, i: int, total: int) -> str:
 # 🤖 HANDLERS
 # ============================================================
 def main_menu_kb():
-    """Main menu inline keyboard as raw dicts to support styles"""
-    return [
+    """Main menu inline keyboard"""
+    return InlineKeyboardMarkup([
         [
-            {"text": "🔍 Search Number", "switch_inline_query_current_chat": ""},
-            {"text": "📊 Status", "callback_data": "cb_status"},
+            btn("🔍 Search Number", switch_inline=""),
+            btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY),
         ],
         [
-            {"text": "ℹ️ Help", "callback_data": "cb_help"},
-            {"text": "⚡ Speed Info", "callback_data": "cb_speed"},
+            btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY),
+            btn("⚡ Speed Info", cd="cb_speed", style=KeyboardButtonStyle.PRIMARY),
         ]
-    ]
+    ])
 
 def not_found_kb():
     """Keyboard shown when number not found"""
-    return [
+    return InlineKeyboardMarkup([
         [
-            {"text": "🔍 Try Another", "switch_inline_query_current_chat": ""},
-            {"text": "ℹ️ Help", "callback_data": "cb_help"},
+            btn("🔍 Try Another", switch_inline=""),
+            btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY),
         ]
-    ]
+    ])
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     name = update.effective_user.first_name
@@ -386,7 +347,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"⚡ <b>Status:</b> {status}\n"
         "━━━━━━━━━━━━━━━━━━━━━"
     )
-    _raw_send(update.effective_chat.id, text, main_menu_kb(), parse_mode="HTML")
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cached = list(CACHE_DIR.glob("prefix_*.parquet"))
@@ -403,17 +364,21 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         msg = "🔴 <b>Database Status: Loading...</b>\n\nPlease wait a moment and try again."
     
-    kb = [[
-        {"text": "🔍 Search Now", "switch_inline_query_current_chat": ""},
-        {"text": "🔄 Refresh", "callback_data": "cb_status"}
-    ]]
-    _raw_send(update.effective_chat.id, msg, kb, parse_mode="HTML")
+    kb = InlineKeyboardMarkup([
+        [
+            btn("🔍 Search Now", switch_inline=""),
+            btn("🔄 Refresh", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
+        ]
+    ])
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    kb = [[
-        {"text": "🔍 Search Number", "switch_inline_query_current_chat": ""},
-        {"text": "📊 Status", "callback_data": "cb_status"}
-    ]]
+    kb = InlineKeyboardMarkup([
+        [
+            btn("🔍 Search Number", switch_inline=""),
+            btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
+        ]
+    ])
     msg = (
         "📖 <b>How to Use</b>\n\n"
         "<b>Commands:</b>\n"
@@ -429,9 +394,9 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "⚡ <b>Speed:</b>\n"
         "🟢 Cached prefix → <code>&lt;0.5s</code> instant\n"
         "🟡 New prefix → <code>5-30s</code> first time, then instant\n\n"
-        "📚 <b>Library:</b> python-telegram-bot v20.7 (Bot API)"
+        "📚 <b>Library:</b> python-telegram-bot v22.8"
     )
-    _raw_send(update.effective_chat.id, msg, kb, parse_mode="HTML")
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -483,31 +448,37 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         else:
             msg = "🔴 <b>Database Status: Loading...</b>\n\nWait a moment and try again."
-        kb = [[
-            {"text": "🔍 Search Now", "switch_inline_query_current_chat": ""},
-            {"text": "🔄 Refresh", "callback_data": "cb_status"}
-        ]]
-        _raw_edit(chat_id, msg_id, msg, kb, parse_mode="HTML")
+        kb = InlineKeyboardMarkup([
+            [
+                btn("🔍 Search Now", switch_inline=""),
+                btn("🔄 Refresh", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
+            ]
+        ])
+        await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
     elif data == "cb_help":
-        kb = [[
-            {"text": "🔍 Search Number", "switch_inline_query_current_chat": ""},
-            {"text": "📊 Status", "callback_data": "cb_status"}
-        ]]
+        kb = InlineKeyboardMarkup([
+            [
+                btn("🔍 Search Number", switch_inline=""),
+                btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
+            ]
+        ])
         msg = (
             "📖 <b>How to Use</b>\n\n"
             "Just send any Indian mobile number:\n"
             "<code>9876543210</code> | <code>+919876543210</code>\n\n"
             "🟢 Cached → Instant\n"
             "🟡 New prefix → 5-30s first time\n\n"
-            "📚 Library: python-telegram-bot v20.7"
+            "📚 Library: python-telegram-bot v22.8"
         )
-        _raw_edit(chat_id, msg_id, msg, kb, parse_mode="HTML")
+        await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
     elif data == "cb_speed":
-        kb = [[
-            {"text": "◀️ Back", "callback_data": "cb_help"}
-        ]]
+        kb = InlineKeyboardMarkup([
+            [
+                btn("◀️ Back", cd="cb_help", style=KeyboardButtonStyle.PRIMARY)
+            ]
+        ])
         msg = (
             "⚡ <b>Speed Information</b>\n\n"
             "🟢 <b>Cached prefix:</b> <code>&lt; 0.5 seconds</code>\n"
@@ -517,7 +488,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "🔄 <b>After restart:</b> Index rebuilds in ~30s\n"
             "   Cached files persist during session"
         )
-        _raw_edit(chat_id, msg_id, msg, kb, parse_mode="HTML")
+        await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid     = update.effective_user.id
@@ -572,11 +543,11 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "<i>🕐 New numbers take 5-30s to fetch.</i>\n"
         "<i>Previously searched numbers are instant!</i>"
     )
-    search_msg_id = _raw_send(
-        chat_id, search_text,
-        _build_searching_kb(),
-        parse_mode="HTML",
-        reply_to=update.message.message_id
+    search_msg = await update.message.reply_text(
+        search_text,
+        reply_markup=_build_searching_kb(),
+        parse_mode=ParseMode.HTML,
+        reply_to_message_id=update.message.message_id
     )
 
     # ── Step 3: Run search in background ──
@@ -595,10 +566,7 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"⏱ Completed in <code>{elapsed:.2f}s</code>\n"
             "Try a different number or check the format."
         )
-        if search_msg_id:
-            _raw_edit(chat_id, search_msg_id, not_found, _build_result_kb(found=False), parse_mode="HTML")
-        else:
-            _raw_send(chat_id, not_found, _build_result_kb(found=False), parse_mode="HTML")
+        await search_msg.edit_text(not_found, reply_markup=_build_result_kb(found=False), parse_mode=ParseMode.HTML)
         return
 
     total  = len(results)
@@ -620,10 +588,7 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
     final_text = header + body
 
-    if search_msg_id:
-        _raw_edit(chat_id, search_msg_id, final_text, _build_result_kb(found=True), parse_mode="HTML")
-    else:
-        _raw_send(chat_id, final_text, _build_result_kb(found=True), parse_mode="HTML")
+    await search_msg.edit_text(final_text, reply_markup=_build_result_kb(found=True), parse_mode=ParseMode.HTML)
 
 
 
