@@ -765,9 +765,6 @@ def api_search():
     if not mobile:
         return jsonify({"error": "Invalid mobile number format."}), 400, {"Access-Control-Allow-Origin": "*"}
         
-    if not _index_built:
-        return jsonify({"error": "Database is loading. Please try again in a minute."}), 503, {"Access-Control-Allow-Origin": "*"}
-
     try:
         results, elapsed = search_mobile(mobile)
         return jsonify({
