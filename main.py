@@ -28,6 +28,8 @@ from flask import Flask
 # ⚙️ CONFIG
 # ============================================================
 BOT_TOKEN        = os.environ.get("BOT_TOKEN", "")
+FORCE_SUB_CHANNEL = int(os.environ.get("FORCE_SUB_CHANNEL", "-1002657096509"))
+FORCE_SUB_URL     = os.environ.get("FORCE_SUB_URL", "https://t.me/UNIVORA")
 ADMIN_IDS        = list(map(int, filter(None, os.environ.get("ADMIN_IDS", "0").split(","))))
 DRIVE_FOLDER_ID  = os.environ.get("DRIVE_FOLDER_ID", "")   # Merged_Prefix_DB folder ID
 GDRIVE_CREDS     = os.environ.get("GDRIVE_CREDENTIALS", "")
@@ -69,8 +71,6 @@ def _build_result_kb(found=True, is_admin=False):
             btn_status
         ]
     ]
-    if MINI_APP_URL:
-        keyboard.append([btn("🎮 Play Mini Game", web_app_url=MINI_APP_URL)])
     
     if is_admin:
         keyboard.append([btn("📊 Database Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)])
@@ -78,9 +78,6 @@ def _build_result_kb(found=True, is_admin=False):
     return InlineKeyboardMarkup(keyboard)
 
 def _build_searching_kb():
-    """Keyboard shown while searching"""
-    if MINI_APP_URL:
-        return InlineKeyboardMarkup([[btn("🎮 Play While Searching...", web_app_url=MINI_APP_URL)]])
     return InlineKeyboardMarkup([[btn("⏳ Searching...", cd="cb_noop", style=KeyboardButtonStyle.PRIMARY)]])
 
 
@@ -310,6 +307,36 @@ def fmt_row(row: dict, i: int, total: int) -> str:
 # ============================================================
 # 🤖 HANDLERS
 # ============================================================
+
+async def check_force_sub(uid: int, bot) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=FORCE_SUB_CHANNEL, user_id=uid)
+        return member.status in ['member', 'administrator', 'creator', 'restricted']
+    except Exception as e:
+        if "user not found" in str(e).lower():
+            return False
+        log.warning(f"Force Sub Error: {e}")
+        return False
+
+async def enforce_sub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    uid = update.effective_user.id
+    if uid in ADMIN_IDS:
+        return True
+    
+    is_subbed = await check_force_sub(uid, context.bot)
+    if not is_subbed:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Join UNIVORA", url=FORCE_SUB_URL)],
+            [btn("🔄 Check", cd="cb_check_sub", style=KeyboardButtonStyle.SUCCESS)]
+        ])
+        text = "⚠️ <b>Access Denied!</b>\n\nYou must join our official channel to use this bot.\nPlease join and click <b>Check</b>."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        elif update.message:
+            await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return False
+    return True
+
 def main_menu_kb(is_admin=False):
     """Main menu inline keyboard"""
     row1 = [btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS)]
@@ -332,6 +359,8 @@ def not_found_kb(is_admin=False):
     return InlineKeyboardMarkup([row1, row2])
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await enforce_sub(update, ctx):
+        return
     user = update.effective_user
     name = user.first_name
     name = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if name else "User"
@@ -443,6 +472,31 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     is_admin = uid in ADMIN_IDS
 
+    if data == "cb_check_sub":
+        if await check_force_sub(uid, ctx.bot):
+            await q.answer("✅ Thank you for joining!", show_alert=True)
+            await q.message.delete()
+            status = "✅ Ready — Send a number!" if _index_built else "⏳ Database loading..."
+            text = (
+                f"👋 <b>Welcome, <a href='tg://user?id={uid}'>User</a>!</b>\n\n"
+                "🔍 <b><a href='https://t.me/OSINT_UNIVORABOT'>OSINT BOT [UNIVORA]</a></b>\n"
+                "A powerful intelligence tool to analyze and verify telecom records instantly.\n\n"
+                "┏━━━━━━━━━━━━━━━━━━━━\n"
+                "📲 <b>Supported formats:</b>\n"
+                "<code>9876543210</code>\n"
+                "<code>+919876543210</code>\n"
+                "<code>919876543210</code>\n\n"
+                f"⚡ <b>Status:</b> {status}\n"
+                "┗━━━━━━━━━━━━━━━━━━━━"
+            )
+            await q.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(is_admin), disable_web_page_preview=True)
+        else:
+            await q.answer("❌ You haven't joined the channel yet!", show_alert=True)
+        return
+
+    if not await enforce_sub(update, ctx):
+        return
+
     if data == "cb_status":
         if not is_admin:
             await q.answer("⚠️ This button is restricted to Admins only.", show_alert=True)
@@ -500,6 +554,8 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await enforce_sub(update, ctx):
+        return
     uid     = update.effective_user.id
     chat_id = update.effective_chat.id
     text    = update.message.text.strip()
