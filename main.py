@@ -65,7 +65,7 @@ def _build_result_kb(found=True):
     
     keyboard = [
         [
-            btn("🔍 Search Another Number", switch_inline=""),
+            btn("🔍 Search Another Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
             btn_status
         ]
     ]
@@ -313,7 +313,7 @@ def main_menu_kb():
     """Main menu inline keyboard"""
     return InlineKeyboardMarkup([
         [
-            btn("🔍 Search Number", switch_inline=""),
+            btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
             btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY),
         ],
         [
@@ -326,19 +326,22 @@ def not_found_kb():
     """Keyboard shown when number not found"""
     return InlineKeyboardMarkup([
         [
-            btn("🔍 Try Another", switch_inline=""),
+            btn("🔍 Try Another", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
             btn("ℹ️ Help", cd="cb_help", style=KeyboardButtonStyle.PRIMARY),
         ]
     ])
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    name = update.effective_user.first_name
+    user = update.effective_user
+    name = user.first_name
     name = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if name else "User"
+    uid = user.id
+    
     status = "✅ Ready — Send a number!" if _index_built else "⏳ Database loading, please wait..."
     text = (
-        f"👋 <b>Welcome, {name}!</b>\n\n"
-        "🔍 <b>OSINT Search Bot</b>\n"
-        "Search 230GB+ Indian telecom database instantly!\n\n"
+        f"👋 <b>Welcome, <a href='tg://user?id={uid}'>{name}</a>!</b>\n\n"
+        "🔍 <b><a href='https://t.me/OSINT_UNIVORABOT'>OSINT BOT [UNIVORA]</a></b>\n"
+        "A powerful intelligence tool to analyze and verify telecom records instantly.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "📲 <b>Supported formats:</b>\n"
         "<code>9876543210</code>\n"
@@ -347,7 +350,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"⚡ <b>Status:</b> {status}\n"
         "━━━━━━━━━━━━━━━━━━━━━"
     )
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb())
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=main_menu_kb(), disable_web_page_preview=True)
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cached = list(CACHE_DIR.glob("prefix_*.parquet"))
@@ -366,7 +369,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     kb = InlineKeyboardMarkup([
         [
-            btn("🔍 Search Now", switch_inline=""),
+            btn("🔍 Search Now", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
             btn("🔄 Refresh", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
         ]
     ])
@@ -375,7 +378,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([
         [
-            btn("🔍 Search Number", switch_inline=""),
+            btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
             btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
         ]
     ])
@@ -450,7 +453,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             msg = "🔴 <b>Database Status: Loading...</b>\n\nWait a moment and try again."
         kb = InlineKeyboardMarkup([
             [
-                btn("🔍 Search Now", switch_inline=""),
+                btn("🔍 Search Now", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
                 btn("🔄 Refresh", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
             ]
         ])
@@ -459,7 +462,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data == "cb_help":
         kb = InlineKeyboardMarkup([
             [
-                btn("🔍 Search Number", switch_inline=""),
+                btn("🔍 Search Number", switch_inline="", style=KeyboardButtonStyle.SUCCESS),
                 btn("📊 Status", cd="cb_status", style=KeyboardButtonStyle.PRIMARY)
             ]
         ])
