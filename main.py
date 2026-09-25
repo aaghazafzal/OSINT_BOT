@@ -29,7 +29,7 @@ from flask import Flask
 # ============================================================
 BOT_TOKEN        = os.environ.get("BOT_TOKEN", "")
 FORCE_SUB_CHANNEL = int(os.environ.get("FORCE_SUB_CHANNEL", "-1002657096509"))
-FORCE_SUB_URL     = os.environ.get("FORCE_SUB_URL", "https://t.me/UNIVORA")
+FORCE_SUB_URL     = os.environ.get("FORCE_SUB_URL", "https://t.me/UnivoraOfficial")
 ADMIN_IDS        = list(map(int, filter(None, os.environ.get("ADMIN_IDS", "0").split(","))))
 DRIVE_FOLDER_ID  = os.environ.get("DRIVE_FOLDER_ID", "")   # Merged_Prefix_DB folder ID
 GDRIVE_CREDS     = os.environ.get("GDRIVE_CREDENTIALS", "")
@@ -326,7 +326,7 @@ async def enforce_sub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     is_subbed = await check_force_sub(uid, context.bot)
     if not is_subbed:
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Join UNIVORA", url=FORCE_SUB_URL)],
+            [btn("📢 Join UNIVORA", url=FORCE_SUB_URL, style=KeyboardButtonStyle.PRIMARY)],
             [btn("🔄 Check", cd="cb_check_sub", style=KeyboardButtonStyle.SUCCESS)]
         ])
         text = "⚠️ <b>Access Denied!</b>\n\nYou must join our official channel to use this bot.\nPlease join and click <b>Check</b>."
@@ -353,8 +353,8 @@ ABOUT_TEXT = (
 def about_kb():
     return InlineKeyboardMarkup([
         [
-            btn("🌐 Univora Website", url="https://univora.website"),
-            btn("👨‍💻 Developer", url="https://t.me/ROLEX_SIIR")
+            btn("🌐 Univora Website", url="https://univora.website", style=KeyboardButtonStyle.PRIMARY),
+            btn("👨‍💻 Developer", url="https://t.me/ROLEX_SIIR", style=KeyboardButtonStyle.PRIMARY)
         ],
         [
             btn("🔙 Back", cd="cb_start", style=KeyboardButtonStyle.PRIMARY)
