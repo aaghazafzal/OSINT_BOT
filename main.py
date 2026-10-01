@@ -850,7 +850,11 @@ def api_email_lookup():
             line = line.strip()
             if line.startswith("[+]"):
                 site = line[3:].strip()
+                # Skip holehe's own footer summary line
+                if "email used" in site.lower() or "rate limit" in site.lower():
+                    continue
                 found_sites.append(site)
+
 
         return jsonify({
             "success": True,
