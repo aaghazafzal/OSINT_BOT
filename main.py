@@ -818,9 +818,25 @@ def api_email_lookup():
 
     try:
         import subprocess
+        import shutil
         import sys as _sys
+        import os as _os
+
+        # Auto-detect holehe binary: check PATH first, then pip Scripts dir
+        holehe_bin = shutil.which("holehe")
+        if not holehe_bin:
+            # Fallback: same Scripts dir as current Python interpreter
+            scripts_dir = _os.path.join(_os.path.dirname(_sys.executable), "Scripts")
+            for name in ("holehe", "holehe.exe", "holehe.EXE"):
+                candidate = _os.path.join(scripts_dir, name)
+                if _os.path.isfile(candidate):
+                    holehe_bin = candidate
+                    break
+        if not holehe_bin:
+            return jsonify({"error": "holehe is not installed on the server."}), 500, cors_headers
+
         proc = subprocess.run(
-            ["holehe", email, "--only-used", "-NP", "--no-color"],
+            [holehe_bin, email, "--only-used", "-NP", "--no-color"],
             capture_output=True, text=True, timeout=120
         )
         output = proc.stdout or ""
