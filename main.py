@@ -790,6 +790,62 @@ def api_search():
 def ping():
     return "pong", 200
 
+
+@flask_app.route("/api/email-lookup", methods=["POST", "OPTIONS"])
+def api_email_lookup():
+    """Run holehe on an email and return which sites it's registered on."""
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+    if request.method == "OPTIONS":
+        return ("", 204, cors_headers)
+
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    else:
+        client_ip = "unknown"
+
+    if not check_rate_limit(client_ip):
+        return jsonify({"error": "Rate limit exceeded. Please wait a minute."}), 429, cors_headers
+
+    data = request.json or {}
+    email = data.get("email", "").strip().lower()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"error": "Invalid email address."}), 400, cors_headers
+
+    try:
+        import subprocess
+        import sys as _sys
+        proc = subprocess.run(
+            ["holehe", email, "--only-used", "-NP", "--no-color"],
+            capture_output=True, text=True, timeout=120
+        )
+        output = proc.stdout or ""
+
+        # Parse [+] site lines from holehe output
+        found_sites = []
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("[+]"):
+                site = line[3:].strip()
+                found_sites.append(site)
+
+        return jsonify({
+            "success": True,
+            "email": email,
+            "found": found_sites,
+            "total_checked": 117,
+            "count": len(found_sites)
+        }), 200, cors_headers
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Scan timed out. Please try again."}), 504, cors_headers
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500, cors_headers
+
 def self_ping_loop():
     import urllib.request
     url = os.environ.get("WEBHOOK_URL", "").rstrip("/")
