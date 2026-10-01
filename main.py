@@ -844,8 +844,9 @@ def api_email_lookup():
         )
         output = proc.stdout or ""
 
-        # Parse [+] site lines from holehe output
+        # Parse holehe output: [+] found, [x] rate limited, [-] not found
         found_sites = []
+        rate_limited = []
         for line in output.splitlines():
             line = line.strip()
             if line.startswith("[+]"):
@@ -854,12 +855,16 @@ def api_email_lookup():
                 if "email used" in site.lower() or "rate limit" in site.lower():
                     continue
                 found_sites.append(site)
-
+            elif line.startswith("[x]"):
+                site = line[3:].strip()
+                if site:
+                    rate_limited.append(site)
 
         return jsonify({
             "success": True,
             "email": email,
             "found": found_sites,
+            "rate_limited": rate_limited,
             "total_checked": 117,
             "count": len(found_sites)
         }), 200, cors_headers
