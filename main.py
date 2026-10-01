@@ -23,6 +23,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from flask import Flask
+from flask_cors import CORS
 
 # ============================================================
 # ⚙️ CONFIG
@@ -724,6 +725,8 @@ async def handle_msg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # 🚀 FLASK + BOT + STARTUP
 # ============================================================
 flask_app = Flask(__name__)
+CORS(flask_app)  # Allow all origins for API access
+
 
 @flask_app.route("/")
 def health():
