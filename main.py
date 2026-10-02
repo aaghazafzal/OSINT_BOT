@@ -1229,6 +1229,88 @@ def startup():
 
 startup()
 
+@flask_app.route("/api/ip-lookup", methods=["POST", "OPTIONS"])
+def api_ip_lookup():
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    }
+    if request.method == "OPTIONS":
+        return '', 204, cors_headers
+
+    data = request.json or {}
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Query required"}), 400, cors_headers
+
+    import re
+    import socket
+    import ipaddress
+    import requests
+    import whois
+    from datetime import datetime
+
+    # Clean query
+    query = re.sub(r"^https?://", "", query)
+    query = query.split('/')[0]
+
+    is_ip = False
+    ip_to_check = query
+    
+    try:
+        ipaddress.ip_address(query)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+        try:
+            ip_to_check = socket.gethostbyname(query)
+        except Exception:
+            return jsonify({"error": "Could not resolve domain or invalid IP address."}), 400, cors_headers
+
+    # Fetch IP data using ipwho.is (Free, HTTPS, includes security/VPN data)
+    ip_data = {}
+    try:
+        resp = requests.get(f"https://ipwho.is/{ip_to_check}", timeout=10)
+        ip_data = resp.json()
+    except Exception as e:
+        ip_data = {"error": str(e)}
+
+    # Fetch WHOIS data if it's a domain
+    whois_data = None
+    if not is_ip:
+        try:
+            w = whois.whois(query)
+            
+            # Helper to convert datetime to string for JSON serialization
+            def serialize_whois(obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                elif isinstance(obj, list):
+                    return [serialize_whois(item) for item in obj]
+                return obj
+                
+            whois_data = {
+                "registrar": w.get("registrar"),
+                "creation_date": serialize_whois(w.get("creation_date")),
+                "expiration_date": serialize_whois(w.get("expiration_date")),
+                "updated_date": serialize_whois(w.get("updated_date")),
+                "name_servers": serialize_whois(w.get("name_servers")),
+                "status": serialize_whois(w.get("status")),
+                "emails": serialize_whois(w.get("emails")),
+            }
+        except Exception as e:
+            whois_data = {"error": "WHOIS lookup failed or domain is protected."}
+
+    return jsonify({
+        "success": True,
+        "query": query,
+        "ip": ip_to_check,
+        "is_ip": is_ip,
+        "ip_info": ip_data,
+        "whois": whois_data
+    }), 200, cors_headers
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     flask_app.run(host="0.0.0.0", port=port)
