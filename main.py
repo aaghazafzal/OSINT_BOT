@@ -852,7 +852,7 @@ def api_email_lookup():
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             holehe_future = executor.submit(subprocess.run,
-                [holehe_bin, email, "--only-used", "-NP", "--no-color"],
+                [holehe_bin, email, "-NP", "--no-color"],
                 capture_output=True, text=True, timeout=120
             )
             custom_future = executor.submit(run_custom_scanner)
@@ -888,14 +888,19 @@ def api_email_lookup():
         # Add holehe-only sites to the found list (for display in holehe section)
         combined_found = list(all_found_domains)
 
+        # Merge rate_limited domains
+        combined_rate_limited = set(rate_limited)
+        for r_site in custom_results.get("rate_limited", []):
+            combined_rate_limited.add(r_site.lower().strip())
+
         return jsonify({
             "success": True,
             "email": email,
-            "found": holehe_found,  # holehe-found for SiteCards display
+            "found": holehe_found,
             "custom_found": custom_results.get("found", []),
-            "rate_limited": rate_limited,
-            "total_checked": 121 + custom_results.get("total_checked", 0),
-            "count": len(holehe_found) + len(custom_results.get("found", []))
+            "rate_limited": list(combined_rate_limited),
+            "total_checked": 117 + custom_results.get("total_checked", 0),
+            "count": len(all_found_domains)
         }), 200, cors_headers
 
     except subprocess.TimeoutExpired:
