@@ -145,58 +145,76 @@ async def check_keybase(email: str, client: httpx.AsyncClient) -> dict | None:
         return result("Keybase", "keybase.io", False, rate=True)
 
 
-async def check_duolingo(email: str, client: httpx.AsyncClient) -> dict | None:
+async def check_duolingo(email: str, client: httpx.AsyncClient, usernames: list[str] = None) -> dict | None:
     """
     Duolingo email lookup returns a blank user (id=0) when email is private.
-    We check for id > 0 to confirm existence. If id=0, still show it as 
-    a platform the user might have (holehe confirms it).
+    We check for id > 0 to confirm existence via email, or try derived usernames.
     """
+    if usernames is None:
+        usernames = []
+        
+    prefix = email.split('@')[0]
+    if prefix not in usernames:
+        usernames.append(prefix)
+        
     try:
         r = await client.get(
             f"https://www.duolingo.com/2017-06-30/users?email={email}",
             headers={"User-Agent": UA}, timeout=TIMEOUT
         )
+        found_user = None
         if r.status_code == 200:
             data = r.json()
             users = data.get("users", [])
-            if users:
-                u = users[0]
-                user_id = u.get("id", 0)
-                uname = u.get("username", "")
-                # id > 0 means email found; id=0 means not found or private
-                if user_id and user_id > 0 and uname:
-                    pic_path = u.get("picture", "")
-                    if pic_path and "default_2" in pic_path:
-                        # Default avatar — no custom pic
-                        avatar = None
-                    elif pic_path and pic_path.startswith("//"):
-                        avatar = f"https:{pic_path}/xlarge"
-                    elif pic_path and pic_path.startswith("http"):
-                        avatar = pic_path
-                    else:
-                        avatar = None
-                    
-                    joined_ts = u.get("creationDate")
-                    import datetime
-                    joined_str = None
-                    if joined_ts:
-                        joined_str = datetime.datetime.fromtimestamp(joined_ts).strftime("%Y-%m-%d")
-                    
-                    return result(
-                        "Duolingo", "duolingo.com", True,
-                        avatar=avatar,
-                        username=uname,
-                        display_name=u.get("name") or uname,
-                        joined=joined_str,
-                        extra={
-                            "streak": u.get("streak"),
-                            "total_xp": u.get("totalXp"),
-                            "learning_language": u.get("learningLanguage"),
-                            "profile_url": f"https://www.duolingo.com/profile/{uname}",
-                        }
-                    )
-            return result("Duolingo", "duolingo.com", False)
-        return result("Duolingo", "duolingo.com", False, rate=True)
+            if users and users[0].get("id", 0) > 0:
+                found_user = users[0]
+                
+        if not found_user:
+            for un in usernames:
+                r2 = await client.get(
+                    f"https://www.duolingo.com/2017-06-30/users?username={un}",
+                    headers={"User-Agent": UA}, timeout=TIMEOUT
+                )
+                if r2.status_code == 200:
+                    data2 = r2.json()
+                    users2 = data2.get("users", [])
+                    if users2 and users2[0].get("id", 0) > 0:
+                        found_user = users2[0]
+                        break
+
+        if found_user:
+            uname = found_user.get("username", "")
+            pic_path = found_user.get("picture", "")
+            if pic_path and "default" in pic_path:
+                avatar = None
+            elif pic_path and pic_path.startswith("//"):
+                avatar = f"https:{pic_path}/xlarge"
+            elif pic_path and pic_path.startswith("http"):
+                avatar = pic_path
+            else:
+                avatar = None
+            
+            joined_ts = found_user.get("creationDate")
+            import datetime
+            joined_str = None
+            if joined_ts:
+                joined_str = datetime.datetime.fromtimestamp(joined_ts).strftime("%Y-%m-%d")
+            
+            return result(
+                "Duolingo", "duolingo.com", True,
+                avatar=avatar,
+                username=uname,
+                display_name=found_user.get("name") or uname,
+                joined=joined_str,
+                extra={
+                    "streak": found_user.get("streak"),
+                    "total_xp": found_user.get("totalXp"),
+                    "learning_language": found_user.get("learningLanguage"),
+                    "profile_url": f"https://www.duolingo.com/profile/{uname}" if uname else None,
+                }
+            )
+        
+        return result("Duolingo", "duolingo.com", False)
     except Exception:
         return result("Duolingo", "duolingo.com", False, rate=True)
 
@@ -735,12 +753,27 @@ async def scan_email(email: str) -> dict:
     async with httpx.AsyncClient(verify=False, limits=limits, follow_redirects=True) as client:
         
         # All checkers in parallel
-        all_tasks = [
-            # Rich profile checkers
+        # Pass 1: Get profile hubs that might reveal usernames
+        pass1_tasks = [
             check_github(email_lower, client),
-            check_gravatar(email_lower, client),
             check_keybase(email_lower, client),
-            check_duolingo(email_lower, client),
+        ]
+        pass1_results = await asyncio.gather(*pass1_tasks, return_exceptions=True)
+        
+        usernames = []
+        for r in pass1_results:
+            if r and not isinstance(r, Exception):
+                if r["exists"]:
+                    profiles.append(r)
+                    if r.get("username"):
+                        usernames.append(r["username"])
+                else:
+                    platform_results.append(r)
+
+        # Pass 2: Check the rest, passing usernames to Duolingo
+        pass2_tasks = [
+            check_gravatar(email_lower, client),
+            check_duolingo(email_lower, client, usernames),
             check_unavatar(email_lower, client),
             # Exact exist/not-exist checkers
             check_spotify(email_lower, client),
@@ -763,7 +796,8 @@ async def scan_email(email: str) -> dict:
             check_etsy(email_lower, client),
         ]
         
-        all_results = await asyncio.gather(*all_tasks, return_exceptions=True)
+        pass2_results = await asyncio.gather(*pass2_tasks, return_exceptions=True)
+        all_results = pass2_results
         
         for r in all_results:
             if r and not isinstance(r, Exception):
