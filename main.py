@@ -796,7 +796,7 @@ def ping():
 
 @flask_app.route("/api/email-lookup", methods=["POST", "OPTIONS"])
 def api_email_lookup():
-    """Run holehe on an email and return which sites it's registered on."""
+    """Run holehe + custom scanner on an email and return which sites it's registered on."""
     cors_headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST",
@@ -824,11 +824,12 @@ def api_email_lookup():
         import shutil
         import sys as _sys
         import os as _os
+        import threading
+        import concurrent.futures
 
-        # Auto-detect holehe binary: check PATH first, then pip Scripts dir
+        # Auto-detect holehe binary
         holehe_bin = shutil.which("holehe")
         if not holehe_bin:
-            # Fallback: same Scripts dir as current Python interpreter
             scripts_dir = _os.path.join(_os.path.dirname(_sys.executable), "Scripts")
             for name in ("holehe", "holehe.exe", "holehe.EXE"):
                 candidate = _os.path.join(scripts_dir, name)
@@ -838,41 +839,70 @@ def api_email_lookup():
         if not holehe_bin:
             return jsonify({"error": "holehe is not installed on the server."}), 500, cors_headers
 
-        proc = subprocess.run(
-            [holehe_bin, email, "--only-used", "-NP", "--no-color"],
-            capture_output=True, text=True, timeout=120
-        )
+        # Run holehe and custom scanner in parallel
+        custom_results = {"profiles": [], "found": [], "rate_limited": []}
+        
+        def run_custom_scanner():
+            try:
+                from email_osint import scan_email
+                res = asyncio.run(scan_email(email))
+                custom_results.update(res)
+            except Exception as e:
+                logging.error(f"Custom scanner error: {e}")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            holehe_future = executor.submit(subprocess.run,
+                [holehe_bin, email, "--only-used", "-NP", "--no-color"],
+                capture_output=True, text=True, timeout=120
+            )
+            custom_future = executor.submit(run_custom_scanner)
+            
+            proc = holehe_future.result()
+            custom_future.result()
+
         output = proc.stdout or ""
 
         # Parse holehe output: [+] found, [x] rate limited, [-] not found
-        found_sites = []
+        holehe_found = []
         rate_limited = []
         for line in output.splitlines():
             line = line.strip()
             if line.startswith("[+]"):
                 site = line[3:].strip()
-                # Skip holehe's own footer summary line
                 if "email used" in site.lower() or "rate limit" in site.lower():
                     continue
-                found_sites.append(site)
+                holehe_found.append(site)
             elif line.startswith("[x]"):
                 site = line[3:].strip()
                 if site:
                     rate_limited.append(site)
 
+        # Merge: custom scanner might add platforms not in holehe
+        # Also: platforms confirmed by holehe get added to custom_results as basic results
+        all_found_domains = set(custom_results.get("found", []))
+        for site in holehe_found:
+            # Try to extract domain from site name (e.g., "spotify.com" -> "spotify.com")
+            site_lower = site.lower().strip()
+            all_found_domains.add(site_lower)
+
+        # Add holehe-only sites to the found list (for display in holehe section)
+        combined_found = list(all_found_domains)
+
         return jsonify({
             "success": True,
             "email": email,
-            "found": found_sites,
+            "found": holehe_found,  # holehe-found for SiteCards display
+            "custom_found": custom_results.get("found", []),
             "rate_limited": rate_limited,
-            "total_checked": 117,
-            "count": len(found_sites)
+            "total_checked": 121 + custom_results.get("total_checked", 0),
+            "count": len(holehe_found) + len(custom_results.get("found", []))
         }), 200, cors_headers
 
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Scan timed out. Please try again."}), 504, cors_headers
     except Exception as e:
         return jsonify({"error": str(e)}), 500, cors_headers
+
 
 @flask_app.route("/api/email-enrich", methods=["POST", "OPTIONS"])
 def api_email_enrich():
