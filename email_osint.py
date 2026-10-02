@@ -227,6 +227,66 @@ async def check_twitter_available(email: str, client: httpx.AsyncClient) -> dict
         return result("Twitter / X", "twitter.com", False, rate=True)
 
 
+async def check_spotify(email: str, client: httpx.AsyncClient) -> dict | None:
+    try:
+        r = await client.get(
+            "https://spclient.wg.spotify.com/signup/public/v1/account",
+            params={"validate": 1, "email": email},
+            headers={"User-Agent": UA}, timeout=TIMEOUT
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("status") == 20:
+                return result("Spotify", "spotify.com", True)
+            return result("Spotify", "spotify.com", False)
+        return result("Spotify", "spotify.com", False, rate=True)
+    except Exception:
+        return result("Spotify", "spotify.com", False, rate=True)
+
+async def check_microsoft(email: str, client: httpx.AsyncClient) -> dict | None:
+    try:
+        r = await client.post(
+            "https://login.microsoftonline.com/common/GetCredentialType?mkt=en-US",
+            json={"username": email},
+            headers={"User-Agent": UA}, timeout=TIMEOUT
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("IfExistsResult") == 1:
+                return result("Microsoft", "microsoft.com", True)
+            return result("Microsoft", "microsoft.com", False)
+        return result("Microsoft", "microsoft.com", False, rate=True)
+    except Exception:
+        return result("Microsoft", "microsoft.com", False, rate=True)
+
+async def check_wordpress(email: str, client: httpx.AsyncClient) -> dict | None:
+    try:
+        r = await client.get(
+            f"https://public-api.wordpress.com/rest/v1.1/users/{email}/auth-options",
+            headers={"User-Agent": UA}, timeout=TIMEOUT
+        )
+        if r.status_code == 200:
+            return result("WordPress", "wordpress.com", True)
+        elif r.status_code == 404:
+            return result("WordPress", "wordpress.com", False)
+        return result("WordPress", "wordpress.com", False, rate=True)
+    except Exception:
+        return result("WordPress", "wordpress.com", False, rate=True)
+
+async def check_unavatar(email: str, client: httpx.AsyncClient) -> dict | None:
+    try:
+        r = await client.get(
+            f"https://unavatar.io/{email}?json=true",
+            headers={"User-Agent": UA}, timeout=TIMEOUT
+        )
+        if r.status_code == 200:
+            url = r.json().get("url", "")
+            if url and "favicon.svg" not in url and "fallback.png" not in url:
+                return result("Unavatar", "unavatar.io", True, avatar=url)
+        return result("Unavatar", "unavatar.io", False)
+    except Exception:
+        return result("Unavatar", "unavatar.io", False, rate=True)
+
 async def check_platform_forgot_pass(
     name: str, domain: str, client: httpx.AsyncClient,
     method: str, url: str, payload: dict, found_key: str, found_val,
@@ -268,14 +328,6 @@ FORGOT_PASS_CHECKS = [
         "url": "https://accounts.adobe.com/api/account/v1/email/confirm",
         "payload_fn": lambda e: {"email": e, "client_id": "HomePage2", "jslVersion": "v2-v0.34.0-4-g37f2e20"},
         "found_val": ["email_exists", "true"],
-        "is_post": True,
-    },
-    {
-        "name": "Zoom",
-        "domain": "zoom.us",
-        "url": "https://zoom.us/signin/sendSignInLinkByEmail",
-        "payload_fn": lambda e: {"email": e, "type": "link"},
-        "found_val": ["success"],
         "is_post": True,
     },
     {
@@ -408,15 +460,19 @@ async def scan_email(email: str) -> dict:
     profiles = []
     platform_results = []
 
-    limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
+    limits = httpx.Limits(max_connections=30, max_keepalive_connections=15)
     async with httpx.AsyncClient(verify=False, limits=limits, follow_redirects=True) as client:
         
-        # Core enrichment (returns full profiles)
+        # Core enrichment (returns full profiles or exact checks)
         enrichment_tasks = [
             check_github(email_lower, client),
             check_gravatar(email_lower, client),
             check_keybase(email_lower, client),
             check_duolingo(email_lower, client),
+            check_unavatar(email_lower, client),
+            check_spotify(email_lower, client),
+            check_microsoft(email_lower, client),
+            check_wordpress(email_lower, client),
             check_twitter_available(email_lower, client),
         ]
         enrichment_results = await asyncio.gather(*enrichment_tasks, return_exceptions=True)
