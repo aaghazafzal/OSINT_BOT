@@ -933,15 +933,20 @@ def api_username_lookup():
         if not sherlock_bin:
             return jsonify({"error": "sherlock is not installed on the server."}), 500, cors_headers
             
+        # Force unbuffered output so we don't lose results if we timeout and kill it
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        
         proc = subprocess.Popen(
-            [sherlock_bin, username, "--print-found", "--no-color"],
+            [sherlock_bin, username, "--print-found", "--no-color", "--timeout", "3"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=env
         )
         try:
-            # Render has 100s timeout, wait max 45s for sherlock to gather as much as possible
-            output, _ = proc.communicate(timeout=45)
+            # Render has 100s timeout, wait max 90s for sherlock to gather as much as possible
+            output, _ = proc.communicate(timeout=90)
         except subprocess.TimeoutExpired:
             proc.kill()
             output, _ = proc.communicate()
