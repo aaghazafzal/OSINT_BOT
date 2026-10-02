@@ -874,6 +874,98 @@ def api_email_lookup():
     except Exception as e:
         return jsonify({"error": str(e)}), 500, cors_headers
 
+@flask_app.route("/api/email-enrich", methods=["POST", "OPTIONS"])
+def api_email_enrich():
+    cors_headers = {'Access-Control-Allow-Origin': '*'}
+    if request.method == "OPTIONS":
+        return "", 204, cors_headers
+        
+    data = request.get_json()
+    if not data or "email" not in data:
+        return jsonify({"error": "Email is required"}), 400, cors_headers
+        
+    email = data["email"].strip().lower()
+    
+    import requests
+    import hashlib
+    
+    results = {
+        "success": True,
+        "email": email,
+        "profiles": [],
+        "names": [],
+        "usernames": [],
+        "avatars": [],
+        "locations": []
+    }
+    
+    # 1. GitHub API
+    try:
+        gh_headers = {'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'OSINT-Bot'}
+        gh_search = requests.get(f'https://api.github.com/search/commits?q=author-email:{email}', headers=gh_headers, timeout=5)
+        if gh_search.status_code == 200:
+            gh_data = gh_search.json()
+            items = gh_data.get('items', [])
+            if items:
+                author = items[0].get('author')
+                if author:
+                    gh_username = author.get('login')
+                    if gh_username:
+                        results["usernames"].append(gh_username)
+                        
+                        # Get full profile
+                        gh_user = requests.get(f'https://api.github.com/users/{gh_username}', headers=gh_headers, timeout=5)
+                        if gh_user.status_code == 200:
+                            u_data = gh_user.json()
+                            profile = {
+                                "platform": "github",
+                                "username": gh_username,
+                                "name": u_data.get("name"),
+                                "avatar": u_data.get("avatar_url"),
+                                "url": u_data.get("html_url"),
+                                "location": u_data.get("location"),
+                                "extra": {}
+                            }
+                            if u_data.get("company"): profile["extra"]["company"] = u_data.get("company")
+                            if u_data.get("blog"): profile["extra"]["website"] = u_data.get("blog")
+                            if u_data.get("bio"): profile["extra"]["bio"] = u_data.get("bio")
+                            
+                            results["profiles"].append(profile)
+                            if profile["name"] and profile["name"] not in results["names"]: results["names"].append(profile["name"])
+                            if profile["avatar"] and profile["avatar"] not in results["avatars"]: results["avatars"].append(profile["avatar"])
+                            if profile["location"] and profile["location"] not in results["locations"]: results["locations"].append(profile["location"])
+    except Exception as e:
+        print("GitHub OSINT error:", e)
+
+    # 2. Gravatar API
+    try:
+        md5_hash = hashlib.md5(email.encode('utf-8')).hexdigest()
+        grav_res = requests.get(f'https://en.gravatar.com/{md5_hash}.json', headers={'User-Agent': 'OSINT-Bot'}, timeout=5)
+        if grav_res.status_code == 200:
+            g_data = grav_res.json()
+            entry = g_data.get('entry', [])[0]
+            if entry:
+                profile = {
+                    "platform": "gravatar",
+                    "username": entry.get("preferredUsername"),
+                    "name": entry.get("displayName"),
+                    "avatar": entry.get("thumbnailUrl"),
+                    "url": entry.get("profileUrl"),
+                    "location": entry.get("currentLocation"),
+                    "extra": {}
+                }
+                if entry.get("aboutMe"): profile["extra"]["bio"] = entry.get("aboutMe")
+                
+                results["profiles"].append(profile)
+                if profile["username"] and profile["username"] not in results["usernames"]: results["usernames"].append(profile["username"])
+                if profile["name"] and profile["name"] not in results["names"]: results["names"].append(profile["name"])
+                if profile["avatar"] and profile["avatar"] not in results["avatars"]: results["avatars"].append(profile["avatar"])
+                if profile["location"] and profile["location"] not in results["locations"]: results["locations"].append(profile["location"])
+    except Exception as e:
+        print("Gravatar OSINT error:", e)
+        
+    return jsonify(results), 200, cors_headers
+
 def self_ping_loop():
     import urllib.request
     url = os.environ.get("WEBHOOK_URL", "").rstrip("/")
