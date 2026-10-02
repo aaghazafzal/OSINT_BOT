@@ -163,11 +163,16 @@ async def check_duolingo(email: str, client: httpx.AsyncClient, usernames: list[
             headers={"User-Agent": UA}, timeout=TIMEOUT
         )
         found_user = None
+        email_exists_but_private = False
+        
         if r.status_code == 200:
             data = r.json()
             users = data.get("users", [])
-            if users and users[0].get("id", 0) > 0:
-                found_user = users[0]
+            if users:
+                if users[0].get("id", 0) > 0:
+                    found_user = users[0]
+                else:
+                    email_exists_but_private = True
                 
         if not found_user:
             for un in usernames:
@@ -213,6 +218,9 @@ async def check_duolingo(email: str, client: httpx.AsyncClient, usernames: list[
                     "profile_url": f"https://www.duolingo.com/profile/{uname}" if uname else None,
                 }
             )
+        elif email_exists_but_private:
+            # We know it exists, but couldn't guess the username
+            return result("Duolingo", "duolingo.com", True)
         
         return result("Duolingo", "duolingo.com", False)
     except Exception:

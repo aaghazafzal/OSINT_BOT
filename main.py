@@ -852,7 +852,7 @@ def api_email_lookup():
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             holehe_future = executor.submit(subprocess.run,
-                [holehe_bin, email, "-NP", "--no-color"],
+                [holehe_bin, email, "--only-used", "-NP", "--no-color"],
                 capture_output=True, text=True, timeout=120
             )
             custom_future = executor.submit(run_custom_scanner)
