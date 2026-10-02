@@ -928,6 +928,7 @@ def api_username_lookup():
     
     try:
         import shutil
+        import subprocess
         sherlock_bin = shutil.which("sherlock")
         if not sherlock_bin:
             return jsonify({"error": "sherlock is not installed on the server."}), 500, cors_headers
