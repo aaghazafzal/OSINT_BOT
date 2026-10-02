@@ -13,3 +13,6 @@ httpx
 trio
 tqdm
 colorama
+sherlock-project
+
+sherlock-project

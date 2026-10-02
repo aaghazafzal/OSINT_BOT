@@ -909,6 +909,61 @@ def api_email_lookup():
         return jsonify({"error": str(e)}), 500, cors_headers
 
 
+@flask_app.route("/api/username-lookup", methods=["POST", "OPTIONS"])
+def api_username_lookup():
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    }
+    if request.method == "OPTIONS":
+        return '', 204, cors_headers
+    
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return jsonify({"error": "No username provided"}), 400, cors_headers
+    
+    found_urls = []
+    
+    try:
+        import shutil
+        sherlock_bin = shutil.which("sherlock")
+        if not sherlock_bin:
+            return jsonify({"error": "sherlock is not installed on the server."}), 500, cors_headers
+            
+        proc = subprocess.Popen(
+            [sherlock_bin, username, "--print-found", "--no-color"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        try:
+            # Render has 100s timeout, wait max 45s for sherlock to gather as much as possible
+            output, _ = proc.communicate(timeout=45)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            output, _ = proc.communicate()
+            
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("[+]"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    url = parts[1].strip()
+                    if url.startswith("http"):
+                        found_urls.append(url)
+                        
+        return jsonify({
+            "success": True,
+            "username": username,
+            "found": found_urls,
+            "total_checked": 300
+        }), 200, cors_headers
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500, cors_headers
+
+
 @flask_app.route("/api/email-enrich", methods=["POST", "OPTIONS"])
 def api_email_enrich():
     cors_headers = {
