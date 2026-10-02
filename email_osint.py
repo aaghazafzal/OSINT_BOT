@@ -783,25 +783,29 @@ async def scan_email(email: str) -> dict:
             check_gravatar(email_lower, client),
             check_duolingo(email_lower, client, usernames),
             check_unavatar(email_lower, client),
-            # Exact exist/not-exist checkers
+            # Exact exist/not-exist checkers (Verified to work perfectly without WAF blocks)
             check_spotify(email_lower, client),
-            check_microsoft(email_lower, client),
             check_wordpress(email_lower, client),
             check_twitter_available(email_lower, client),
-            check_gitlab(email_lower, client),
-            check_dropbox(email_lower, client),
-            check_zoho(email_lower, client),
-            check_quizlet(email_lower, client),
-            check_adobe(email_lower, client),
-            check_plex(email_lower, client),
-            check_wix(email_lower, client),
-            check_snapchat(email_lower, client),
-            check_discord(email_lower, client),
-            check_pinterest(email_lower, client),
-            check_canva(email_lower, client),
-            check_coursera(email_lower, client),
-            check_amazon(email_lower, client),
-            check_etsy(email_lower, client),
+            
+            # The below were removed because APIs updated to prevent enumeration (False Positives):
+            # check_microsoft(email_lower, client),
+            # check_gitlab(email_lower, client),
+            # check_zoho(email_lower, client),
+            # check_etsy(email_lower, client),
+            
+            # The below were removed because Cloudflare blocks them from non-residential IPs (Rate Limited):
+            # check_dropbox(email_lower, client),
+            # check_quizlet(email_lower, client),
+            # check_adobe(email_lower, client),
+            # check_plex(email_lower, client),
+            # check_wix(email_lower, client),
+            # check_snapchat(email_lower, client),
+            # check_discord(email_lower, client),
+            # check_pinterest(email_lower, client),
+            # check_canva(email_lower, client),
+            # check_coursera(email_lower, client),
+            # check_amazon(email_lower, client),
         ]
         
         pass2_results = await asyncio.gather(*pass2_tasks, return_exceptions=True)
