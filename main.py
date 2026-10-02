@@ -970,6 +970,169 @@ def api_username_lookup():
         return jsonify({"error": str(e)}), 500, cors_headers
 
 
+@flask_app.route("/api/email-lookup-stream", methods=["POST", "OPTIONS"])
+def api_email_lookup_stream():
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    }
+    if request.method == "OPTIONS":
+        return '', 204, cors_headers
+    
+    data = request.json or {}
+    email = data.get("email", "").strip().lower()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"error": "Invalid email address."}), 400, cors_headers
+        
+    def generate():
+        import shutil
+        import subprocess
+        import os
+        import threading
+        import queue
+        import asyncio
+        import sys
+        
+        holehe_bin = shutil.which("holehe")
+        if not holehe_bin:
+            scripts_dir = os.path.join(os.path.dirname(sys.executable), "Scripts")
+            for name in ("holehe", "holehe.exe", "holehe.EXE"):
+                candidate = os.path.join(scripts_dir, name)
+                if os.path.isfile(candidate):
+                    holehe_bin = candidate
+                    break
+                    
+        if not holehe_bin:
+            yield json.dumps({"error": "holehe is not installed on the server."}) + "\n"
+            return
+            
+        q = queue.Queue()
+        
+        def run_holehe():
+            try:
+                env = os.environ.copy()
+                env["PYTHONUNBUFFERED"] = "1"
+                proc = subprocess.Popen(
+                    [holehe_bin, email, "--only-used", "-NP", "--no-color"], 
+                    stdout=subprocess.PIPE, text=True, env=env
+                )
+                for line in iter(proc.stdout.readline, ''):
+                    q.put({"type": "holehe", "line": line.strip()})
+                proc.wait()
+            except Exception as e:
+                q.put({"type": "error", "error": str(e)})
+            finally:
+                q.put({"type": "holehe_done"})
+                
+        def run_custom():
+            try:
+                from email_osint import scan_email
+                res = asyncio.run(scan_email(email))
+                q.put({"type": "custom", "data": res})
+            except Exception as e:
+                q.put({"type": "error", "error": str(e)})
+                q.put({"type": "custom", "data": {}})
+                
+        t1 = threading.Thread(target=run_holehe)
+        t2 = threading.Thread(target=run_custom)
+        t1.start(); t2.start()
+        
+        yield json.dumps({"status": "started", "total_checked": 140}) + "\n"
+        
+        holehe_done = False
+        custom_done = False
+        
+        while not (holehe_done and custom_done):
+            try:
+                msg = q.get(timeout=1)
+                if msg["type"] == "holehe":
+                    line = msg["line"]
+                    if line.startswith("[+]"):
+                        site = line[3:].strip()
+                        if "email used" not in site.lower() and "rate limit" not in site.lower():
+                            yield json.dumps({"status": "found", "site": site}) + "\n"
+                elif msg["type"] == "holehe_done":
+                    holehe_done = True
+                elif msg["type"] == "custom":
+                    yield json.dumps({"status": "custom", "data": msg["data"]}) + "\n"
+                    custom_done = True
+                elif msg["type"] == "error":
+                    logging.error(f"Stream error: {msg['error']}")
+            except queue.Empty:
+                pass
+                
+        yield json.dumps({"status": "done"}) + "\n"
+        
+    from flask import Response
+    return Response(generate(), mimetype="application/x-ndjson", headers=cors_headers)
+
+@flask_app.route("/api/username-lookup-stream", methods=["POST", "OPTIONS"])
+def api_username_lookup_stream():
+    cors_headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    }
+    if request.method == "OPTIONS":
+        return '', 204, cors_headers
+    
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return jsonify({"error": "No username provided"}), 400, cors_headers
+        
+    def generate():
+        import shutil
+        import subprocess
+        import os
+        sherlock_bin = shutil.which("sherlock")
+        if not sherlock_bin:
+            yield json.dumps({"error": "sherlock is not installed on the server."}) + "\n"
+            return
+            
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        
+        proc = subprocess.Popen(
+            [sherlock_bin, username, "--print-found", "--no-color", "--timeout", "3"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env
+        )
+        
+        yield json.dumps({"status": "started", "username": username, "total_checked": 300}) + "\n"
+        
+        import time
+        start_time = time.time()
+        
+        while True:
+            # Check timeout (90s max)
+            if time.time() - start_time > 90:
+                proc.kill()
+                break
+                
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+                continue
+                
+            line = line.strip()
+            if line.startswith("[+]"):
+                parts = line.split(":", 1)
+                if len(parts) > 1:
+                    url = parts[1].strip()
+                    if url.startswith("http"):
+                        yield json.dumps({"status": "found", "url": url}) + "\n"
+                        
+        yield json.dumps({"status": "done"}) + "\n"
+
+    from flask import Response
+    return Response(generate(), mimetype="application/x-ndjson", headers=cors_headers)
+
 @flask_app.route("/api/email-enrich", methods=["POST", "OPTIONS"])
 def api_email_enrich():
     cors_headers = {
